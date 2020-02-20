@@ -1,0 +1,38 @@
+ins-pcd.c:    NSSolver *ns = (NSSolver *) pc_solver->mat->mv_data[0];
+ins-pcd.c:/*   to free solver->mat->mv_data.	    */
+ins-solver.c:     * requires solver->rhs->map to map U into vector indices */
+ins-solver.c.bk:     * requires solver->rhs->map to map U into vector indices */
+moving-mesh.c:        phgMatDumpMATLAB(solver->mat, "Ah", "Ah_.m");
+moving-mesh.c:        phgVecDumpMATLAB(solver->rhs, "bh", "bh_.m");
+moving-mesh.c:	      solver->nits, solver->residual);
+moving-mesh.c:	solver->rhs->assembled = TRUE;
+moving-mesh.c:	phgVecAXPBY(1., rhs, 0, &solver->rhs);
+moving-mesh.c:	solver->rhs->assembled = TRUE;
+moving-mesh.c:	phgVecAXPBY(1., rhs, 0, &solver->rhs);
+moving-mesh.c:    phgVecDisassemble(solver->rhs);
+moving-mesh.c:		    phgMapE2L(solver->rhs->map, 0, e, i * dim + k);
+moving-mesh.c:	phgVecAddEntries(solver->rhs, 0, M * dim, I[0], &rhs[0][0]);
+moving-mesh.c:	      u->name, solver->nits, solver->residual);
+moving-mesh.c.bk:	phgMatDumpMATLAB(solver->mat, "Ah", "Ah_.m");
+moving-mesh.c.bk:	phgVecDumpMATLAB(solver->rhs, "bh", "bh_.m");
+moving-mesh.c.bk:	      solver->nits, solver->residual);
+moving-mesh.c.bk:    phgVecDisassemble(solver->rhs);
+moving-mesh.c.bk:		    phgMapE2L(solver->rhs->map, 0, e, i * dim + k);
+moving-mesh.c.bk:	phgVecAddEntries(solver->rhs, 0, M * dim, I[0], &rhs[0][0]);
+moving-mesh.c.bk:	      u->name, solver->nits, solver->residual);
+moving-mesh.c.bk.1:        phgMatDumpMATLAB(solver->mat, "Ah", "Ah_.m");
+moving-mesh.c.bk.1:        phgVecDumpMATLAB(solver->rhs, "bh", "bh_.m");
+moving-mesh.c.bk.1:	      solver->nits, solver->residual);
+moving-mesh.c.bk.1:    phgVecDisassemble(solver->rhs);
+moving-mesh.c.bk.1:		    phgMapE2L(solver->rhs->map, 0, e, i * dim + k);
+moving-mesh.c.bk.1:	phgVecAddEntries(solver->rhs, 0, M * dim, I[0], &rhs[0][0]);
+moving-mesh.c.bk.1:	      u->name, solver->nits, solver->residual);
+TEST.c:            local_map_idx[i] = phgMapE2L(solver->rhs->map, 0, e, i);
+TEST.c:    solver->rhs = vec_nf0;
+TEST.c:    solver->mat = mat;
+TEST.c:	solver->rhs->assembled = TRUE;
+TEST.c:	phgVecAXPBY(1., vec_res_u, 0, &solver->rhs);
+TEST.c:    //solver->rhs = phgVecCopy(vec_res_u, NULL);
+TEST.c:    phgVecDump(solver->rhs, "rhs.txt");
+TEST.c:            I[i] = phgMapE2L(solver->mat->cmap, 0, e, i);
+TEST.c:            I[i] = phgMapE2L(solver->mat->cmap, 0, e, i);
