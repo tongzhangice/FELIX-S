@@ -79,31 +79,8 @@ func_xyz_(FLOAT x, FLOAT y, FLOAT z, FLOAT *values)
 
 
 
-#if TEST_CASE == 1 ||\
-    TEST_CASE == 2
-#  include "ins-testcase.c"
-
-#elif ICE_BENCH_TEST
-#  include "ISMIP-HOM.c"
-
-#elif ESIMINT_TEST
-//#  include "test-solverT-bc.c"
-#  include "ESIMINT-TEST.c"
-
-#elif HEINO_TSET
-#  include "HEINO-TSET.c"
-
-#elif TEST_CASE == ICE_GREEN_LAND
-#  include "GREENLAND.c"
-
-//#elif TEST_CASE == LAS 
-//#  include "LAS.c"
-
-#elif TEST_CASE == TEST 
-#  include "TEST.c"
-
-#elif TEST_CASE == ICE_EXACT
-#  include "EXACT.c"
+#if TEST_CASE == LAS 
+#  include "LAS.c"
 
 #else
 #  error Test case wrong!!!

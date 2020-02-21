@@ -752,3 +752,49 @@ INT check_u_convergence(NSSolver *ns, DOF *u, DOF *p, DOF *u_last, DOF *p_last, 
 
     return u_convergence;
 }
+
+void
+get_surf_bot_elev(NSSolver *ns)
+{
+    /* surf_or_bot = 0: all vert layers contain surf elev
+     * surf_or_bot = 1: all vert layers contain bot elev
+     */
+    GRID *g = ns->g;
+    LAYERED_MESH *gL = ns->gL;
+    DOF *surf_elev_P1, *bot_elev_P1; 
+    FLOAT z0, z1;
+    int i, j, ii;
+
+    surf_elev_P1 = phgDofNew(g, DOF_P1, 1, "surf P1", DofNoAction);
+    bot_elev_P1 = phgDofNew(g, DOF_P1, 1, "bot P1", DofNoAction);
+
+    for (ii = 0; ii < gL->nvert_bot; ii++) {
+	i = gL->vert_bot_Lidx[ii];
+	assert(gL->vert_local_lists[i] != NULL);
+
+	int nv = gL->vert_local_lists[i][0];
+	int *iL = &gL->vert_local_lists[i][1];
+	assert(nv > 0);
+
+	z0 = g->verts[iL[nv-1]][Z_DIR];
+	z1 = g->verts[iL[0]][Z_DIR];
+
+	for (j = 0; j < nv; j++) {
+        *DofVertexData(surf_elev_P1, iL[j]) = z0;
+        *DofVertexData(bot_elev_P1, iL[j]) = z1;
+	}
+    }
+
+    //phgExportVTK(g, "depth.vtk", depth_P1, depth_P2, NULL);
+
+    if (ns->surf_elev_P1!= NULL)
+	phgDofFree(&ns->surf_elev_P1);
+
+    if (ns->bot_elev_P1!= NULL)
+	phgDofFree(&ns->bot_elev_P1);
+
+    ns->surf_elev_P1 = surf_elev_P1;
+    ns->bot_elev_P1 = bot_elev_P1;
+
+    return;
+}

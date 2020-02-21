@@ -76,6 +76,8 @@ get_surface_bases(GRID *g, DOF_TYPE *u_type)
 	    INT id; 
 	    SHORT ibas_face[nbas_face];
 
+        //FLOAT *normal = phgGeomGetFaceOutNormal(g, e, s);
+
         //if (!((e->bound_type[s] & BC_BOTTOM) && !(e->bound_type[s] & BC_ISHELF)))
         if (!(e->bound_type[s] & BC_BOTTOM))
             continue;

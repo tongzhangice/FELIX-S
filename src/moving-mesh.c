@@ -12,6 +12,8 @@ static void get_moved_coord_FEM(NSSolver *ns, int nstep);
 static void get_moved_coord_FV_cell(NSSolver *ns, int nstep);
 static void get_moved_coord_FV_point(NSSolver *ns, int nstep);
 
+static double accum = 0.5; // m a-1
+
 
 /*
  * Scheme:
@@ -902,7 +904,7 @@ get_surf_dH(NSSolver *ns)
 			    
 			}
 
-			b[i] += area*(*w) * (1*z * LEN_SCALING / dt[0]+ vu[2] + 0.5*dt[0]) * (gi + 1*tau*ti);
+			b[i] += area*(*w) * (1*z * LEN_SCALING / dt[0]+ vu[2] + accum*dt[0]) * (gi + 1*tau*ti);
 			b0[i] += area*(*w) * (1*z * LEN_SCALING / dt[0]+ 0*vu[2]) * (gi + 1*tau*ti);
 		    }
 		} 

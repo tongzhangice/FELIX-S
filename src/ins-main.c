@@ -114,7 +114,8 @@ main(int argc, char *argv[])
      */
 
     iceInit(g, &gL);
-    phgExportVTK(g, "ice_domain.vtk", NULL);
+    phgPrintf("Geometry initialization done!\n");
+    phgExportVTK(g, "ice_domain.vtk", NULL, NULL);
 
 
     /* ================================================================================
@@ -175,14 +176,14 @@ main(int argc, char *argv[])
     if (ns_params->resume) {
 	FILE *fp = NULL;
 	char fname[1000];
-        //phgPrintf("tstep: %d\n", tstep);
 	phgResumeStage(g, &Time, &tstep, mesh_file, data_file);
 
 	/* resume coord */
 	{
 	    const FLOAT *v = DofData(ns->coord);
 	    int i, k;
-	    sprintf(data_Crd, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat.Crd", tstep);
+	    //sprintf(data_Crd, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat.Crd", tstep - 1);
+	    sprintf(data_Crd, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat.Crd", 2);
 	    assert(ns->coord->type == DOF_P1);
 	    load_dof_data3(g, ns->coord, data_Crd, mesh_file);
 	    for (i = 0; i < g->nvert; i++) 
@@ -191,9 +192,10 @@ main(int argc, char *argv[])
 	    phgGeomInit_(g, TRUE);
 	}
 
-#if 0
+#if 1
 	/* resmue u_{n-1} */
-	sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", tstep - 1);
+	//sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", tstep - 2);
+	sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", 1);
 	DATA_FILE_SURFIX;
 	sprintf(fname, "%s.p%03d", data_u, g->rank);
 	if ((fp = fopen(fname, "r")) == NULL) {
@@ -229,7 +231,8 @@ main(int argc, char *argv[])
 	}
 
 	/* resmue u_{n} */
-	sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", tstep);
+	//sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", tstep - 1);
+	sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", 2);
 	DATA_FILE_SURFIX;
 	sprintf(fname, "%s.p%03d", data_u, g->rank);
 	if ((fp = fopen(fname, "r")) == NULL) {
@@ -267,7 +270,8 @@ main(int argc, char *argv[])
 
 
 	/* reconstruct last time step */
-	Time -= dt[0];
+	//Time -= dt[0];
+	Time = tstep - 1;
 	ns->time[1] = Time;
 	ns->time[0] = Time;
 	setFuncTime(Time);
@@ -298,6 +302,18 @@ main(int argc, char *argv[])
      * ================================================================================
      */
     while (TRUE) {
+
+
+    FLOAT all_memory_usage = phgMemoryUsage(g, NULL)/(1024.0*1024.0);
+    if (all_memory_usage > 10000)
+        break;
+
+    get_surf_bot_elev(ns);
+    DOF *grad_surf_elev = phgDofGradient(ns->surf_elev_P1, NULL, NULL, "gradu_surf_elev");
+    ns->grad_surf_elev = grad_surf_elev;
+    
+
+
 
         //phgPrintf("modify mask bot!!\n");
         //modify_mask_bot(ns);
@@ -507,7 +523,9 @@ main(int argc, char *argv[])
 	     * */
 	    phgPrintf("solver tol: %E\n", ns->solver_u->rtol);
 
+
 	    phgSolverSolve(ns->solver_u, TRUE, ns->du, ns->dp, NULL);
+
 
 	   // elapsed_time(g, TRUE, phgPerfGetMflops(g, NULL, NULL));
         //get_water_pressure(ns);
@@ -533,7 +551,7 @@ main(int argc, char *argv[])
 	    /* save dofs */
 	    phgDofCopy(u[1], &u_last, NULL, "u_last");
 	    phgDofCopy(p[1], &p_last, NULL, "p_last");
-        //phgExportVTK(g, "u_test.vtk", ns->u[1], NULL);
+        phgExportVTK(g, "u_test.vtk", ns->u[1], NULL);
 
 	    /* nonlinear correction */
 	    phgDofAXPY(1.0, ns->du, &u[1]);
@@ -699,6 +717,7 @@ main(int argc, char *argv[])
 	phgDofFree(&u_last);
 	phgDofFree(&p_last);
 
+
 	//phgPrintf("Save Dofs\n");
 	//save_dof_data3(g, u[1], OUTPUT_DIR"u.dat");
 	//save_dof_data3(g, p[1], OUTPUT_DIR"p.dat");
@@ -737,17 +756,39 @@ main(int argc, char *argv[])
 
     get_mask_bot(ns);
 
+    if (!(ns_params->another_run_with_updated_mask))
+    {
+        mask_iter = 1;
+        phgPrintf("manually stops another run with updated mask!\n\n\n");
+
+
+        IF_CHANGE_MASK = if_update_shelf_mask(ns);
+        IF_CHANGE_MASK = 0;
+        get_mask_bot(ns);
+        if (tstep % ns_params->step_span == 0) { 
+            phgPrintf("Save water and nodal forces to VTK \n");
+            DOF *water_P1 = phgDofCopy(ns->water_force, NULL, DOF_P1, NULL);
+            DOF *nodal_P1 = phgDofCopy(ns->nodal_force, NULL, DOF_P1, NULL);
+            sprintf(vtk_file, MASK_OUTPUT_DIR "MASK_%05d.vtk", tstep);
+            phgExportVTK(g, vtk_file, water_P1,nodal_P1,ns->contact_force,ns->mask_bot,NULL);
+            phgDofFree(&water_P1);phgDofFree(&nodal_P1);
+        }
+    }
+
     if (mask_iter < 1)
     {
     IF_CHANGE_MASK = if_update_shelf_mask(ns);
     }
 
 
+
+    if ((ns_params->another_run_with_updated_mask)){
     if (IF_CHANGE_MASK == 0)
     {
         phgPrintf("The lower surface mask remains unchanged. Stop the iteration of mask updating !\n");
 
         if (tstep % ns_params->step_span == 0) { 
+            get_mask_bot(ns);
             phgPrintf("Save water and nodal forces to VTK \n");
             DOF *water_P1 = phgDofCopy(ns->water_force, NULL, DOF_P1, NULL);
             DOF *nodal_P1 = phgDofCopy(ns->nodal_force, NULL, DOF_P1, NULL);
@@ -762,6 +803,8 @@ main(int argc, char *argv[])
 
         break;
     }
+    }
+
 
     if (mask_iter == 1)
     {
@@ -787,6 +830,7 @@ main(int argc, char *argv[])
     phgDofFree(&ns->water_force);
     phgDofFree(&ns->contact_force);
 
+
     //phgDofFree(&ns->mask_bot);
 
     //phgDofFree(&ns->water_pressure);
@@ -803,45 +847,65 @@ main(int argc, char *argv[])
 
     }
 
-	/* Export gradu */
-#if 0
-	if (0) {
-	    int i, k;
-	    DOF *Gu[DDim], *gu[DDim], *guDG0;
-	    guDG0 = phgDofCopy(ns->gradu[1], NULL, DOF_P0, NULL);
 
-	    for (k = 0; k < DDim; k++) {
-		FLOAT *vGu;
-		INT n;
-		char name[1000];
+        proj_gradu(ns, ns->gradu[1]);
 
-		sprintf(name, "Gu%d", k);
-		Gu[k] = phgDofNew(g, DOF_P1, 1, name, DofNoAction);
-		vGu = ns->Gradu->data; /* DOF_P1 */
-		n = DofGetDataCount(Gu[k]);
-		for (i = 0; i < n; i++)
-		    Gu[k]->data[i] = vGu[i * DDim + k];
+        get_stress(ns, ns->Gradu/*ns->gradu[1]*/, ns->p[1]);
 
-		
-		sprintf(name, "gu%d", k);
-		gu[k] = phgDofNew(g, DOF_P0, 1, name, DofNoAction);
-		vGu = guDG0->data;   /* DOF_P0 */
-		n = DofGetDataCount(gu[k]);
-		for (i = 0; i < n; i++)
-		    gu[k]->data[i] = vGu[i * DDim + k];
-	    }
 
-	    
-	    phgExportVTK(g, "Gu.vtk",
-			 Gu[0], Gu[1], Gu[2],
-			 Gu[3], Gu[4], Gu[5],
-			 Gu[6], Gu[7], Gu[8],
-			 gu[0], gu[1], gu[2],
-			 gu[3], gu[4], gu[5],
-			 gu[6], gu[7], gu[8],
-			 NULL);
-	    phgFinalize();
-	}
+
+#if 1
+        if (1) {
+            int i, k;
+            DOF *Gu[DDim], *gu[DDim], *guDG0, *stress[DDim];
+            guDG0 = phgDofCopy(ns->gradu[1], NULL, DOF_P0, NULL);
+
+            for (k = 0; k < DDim; k++) {
+            FLOAT *vGu;
+            INT n;
+            char name[1000];
+
+            sprintf(name, "Gu%d", k);
+            Gu[k] = phgDofNew(g, DOF_P1, 1, name, DofNoAction);
+            vGu = ns->Gradu->data; /* DOF_P1 */
+            n = DofGetDataCount(Gu[k]);
+            for (i = 0; i < n; i++)
+                Gu[k]->data[i] = vGu[i * DDim + k];
+
+            sprintf(name, "stress%d", k);
+            stress[k] = phgDofNew(g, DOF_P1, 1, name, DofNoAction);
+            vGu = ns->stress->data; /* DOF_P1 */
+            n = DofGetDataCount(stress[k]);
+            for (i = 0; i < n; i++)
+                stress[k]->data[i] = vGu[i * DDim + k];
+            
+            sprintf(name, "gu%d", k);
+            //gu[k] = phgDofNew(g, DOF_P0, 1, name, DofNoAction);
+            gu[k] = phgDofNew(g, DOF_P1, 1, name, DofNoAction);
+            //vGu = guDG0->data;   /* DOF_P0 */
+            vGu = ns->gradu[1]->data;   /* DOF_P0 */
+            n = DofGetDataCount(gu[k]);
+            for (i = 0; i < n; i++)
+                gu[k]->data[i] = vGu[i * DDim + k];
+            }
+
+            
+            phgExportVTK(g, "stress.vtk",
+                    stress[0], stress[1], stress[2],
+                    stress[3], stress[4], stress[5],
+                    stress[6], stress[7], stress[8],
+                    NULL);
+
+            phgExportVTK(g, "Gu.vtk",
+                 Gu[0], Gu[1], Gu[2],
+                 Gu[3], Gu[4], Gu[5],
+                 Gu[6], Gu[7], Gu[8],
+                 gu[0], gu[1], gu[2],
+                 gu[3], gu[4], gu[5],
+                 gu[6], gu[7], gu[8],
+                 NULL);
+           // phgFinalize();
+        }
 #endif
 
 
@@ -975,10 +1039,10 @@ main(int argc, char *argv[])
 		phgPrintf("Move mesh.\n");
         get_surf_dH(ns);
         //DOF *dH_fem = phgDofCopy(ns->dH, NULL, NULL, NULL);
-        //phgExportVTK(g, "dH_fem1.vtk", ns->dH, NULL);
+        phgExportVTK(g, "dH_fem1.vtk", ns->dH, NULL);
         get_smooth_surface_values(ns, ns->dH, 0);
         get_smooth_surface_values(ns, ns->dH, 1);
-        //phgExportVTK(g, "dH_fem.vtk", ns->dH, NULL);
+        phgExportVTK(g, "dH_fem.vtk", ns->dH, NULL);
 
         /*
         save_free_surface_elev(ns, 0);
@@ -1041,7 +1105,7 @@ main(int argc, char *argv[])
     FLOAT dVdt = fabs(ice_volume-ice_volume_last)/ice_volume/dt[0]; 
 
 
-    if (Time > 100 && dVdt < ns_params->s_tol)
+    if (Time > 10 && dVdt < ns_params->s_tol)
     {
         phgPrintf("-----------------------------------------------------\n");
         phgPrintf("The ice domain reaches a steady state! Model stops! dVdt %e", dVdt);
@@ -1088,6 +1152,8 @@ main(int argc, char *argv[])
         phgDofFree(&u_P1);
 	    sprintf(vtk_file, dH_OUTPUT_DIR "dH_%05d.vtk", tstep);
 	    phgExportVTK(g, vtk_file, ns->dH, NULL);
+	    sprintf(vtk_file, dH_OUTPUT_DIR "stress_%05d.vtk", tstep);
+	    phgExportVTK(g, vtk_file, ns->stress, NULL);
 	    //sprintf(vtk_file, OUTPUT_DIR "mask_%05d.vtk", tstep);
 	    //phgExportVTK(g, vtk_file, ns->mask_bot, NULL);
 	    
@@ -1100,13 +1166,15 @@ main(int argc, char *argv[])
 	if (tstep % ns_params->step_span_resume == 0) { 
 	    {
 		//sprintf(data_Crd, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat.Crd", tstep);
-		//assert(ns->coord->type == DOF_P1);
-		//save_dof_data3(g, ns->coord, data_Crd);
+		sprintf(data_Crd, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat.Crd", 2);
+		assert(ns->coord->type == DOF_P1);
+		save_dof_data3(g, ns->coord, data_Crd);
 	    }
 
 	    if (ns_params->record) {			
 		/* save dof data for time step {n}, {n+1} */
-		sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", tstep - 1);
+		//sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", tstep - 1);
+		sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", 1);
 		DATA_FILE_SURFIX;
 		save_dof_data3(g, u[0], data_u);
 		save_dof_data3(g, p[0], data_p);
@@ -1122,7 +1190,8 @@ main(int argc, char *argv[])
 		DOF_SCALE(gradu[0], "save");
 		
 
-		sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", tstep);
+		//sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", tstep);
+		sprintf(data_file, OUTPUT_DIR "/ins_" NS_PROBLEM "_%05d.dat", 2);
 		DATA_FILE_SURFIX;
 		save_dof_data3(g, u[1], data_u);
 		save_dof_data3(g, p[1], data_p);

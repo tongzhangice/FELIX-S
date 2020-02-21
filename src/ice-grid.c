@@ -10,14 +10,13 @@
 /*
  * Init ice grid using ice height.
  * */
-//GEO_INFO *
 void
 ice_grid(GRID *g)
 {
     SIMPLEX *e;
     INT i, k, s;
     DOF *coord = phgDofNew(g, DOF_P1, Dim, "coord", func_ice_slab);
-    DOF *ice_shelf_mask = phgDofNew(g, DOF_P3, 1, "ice_shelf_mask", func_ice_shelf_mask);
+    DOF *ice_shelf_mask = phgDofNew(g, DOF_P1, 1, "ice_shelf_mask", func_ice_shelf_mask);
     phgExportVTK(g, "ice_shelf_mask.vtk", ice_shelf_mask, NULL);
     FLOAT *v0, *v1, Area[5];
     const FLOAT eps = 1e-8;
@@ -50,40 +49,85 @@ ice_grid(GRID *g)
 		if (fabs(1 - INNER_PRODUCT(n, n_top)) < eps) {
 		    e->bound_type[s] = BC_TOP;    /* clear other */
 		    Area[0] += a;
-		} else if (fabs(1 - INNER_PRODUCT(n, n_bottom)) < eps) {
+		} 
+        else if (fabs(1 - INNER_PRODUCT(n, n_bottom)) < eps) {
 		    e->bound_type[s] = BC_BOTTOM; /* clear other */
 		    
             if (ns_params->add_ice_shelf){
 
-            if (*DofFaceData(ice_shelf_mask, e->faces[s])<1.1 && *DofFaceData(ice_shelf_mask, e->faces[s]) > 0) {
-                e->bound_type[s] = (BC_ISHELF | BC_BOTTOM);
+                INT v0 = GetFaceVertex(s, 0);
+                INT v1 = GetFaceVertex(s, 1);
+                INT v2 = GetFaceVertex(s, 2);
+                INT local_idx0 = e->verts[v0];
+                INT local_idx1 = e->verts[v1];
+                INT local_idx2 = e->verts[v2];
+
+
+                if (*DofVertexData(ice_shelf_mask, local_idx0) > 0 && 
+                    *DofVertexData(ice_shelf_mask, local_idx1) > 0 && 
+                    *DofVertexData(ice_shelf_mask, local_idx2) > 0) {
+                
+                    e->bound_type[s] = (BC_ISHELF | BC_BOTTOM);
+                }
+                else
+                    e->bound_type[s] = (BC_BOTTOM_GRD | BC_BOTTOM);
+
+                INT TEST_ICE_SHELF_BUTS_2D = 0;
+                if (TEST_ICE_SHELF_BUTS_2D == 1)
+                {
+                    if (g->verts[local_idx0][0] <= 1e-1 &&
+                        g->verts[local_idx1][0] <= 1e-1 &&
+                        g->verts[local_idx2][0] <= 1e-1) { 
+
+                        e->bound_type[s] = (BC_BOTTOM_GRD_ADD | BC_BOTTOM);
+
+                    }
+                }
+
             }
-            else
-                e->bound_type[s] = (BC_BOTTOM_GRD | BC_BOTTOM);
-            }
+
+
+
             
 		    Area[1] += a;
-		} else if (fabs(1 - INNER_PRODUCT(n, n_terminus)) < eps){
+		} 
+        /*
+        else if (fabs(1 - INNER_PRODUCT(n, n_terminus)) < eps){
             e->bound_type[s] = BC_TERMNS;
         }
         else if (fabs(1-INNER_PRODUCT(n, n_divide)) < eps){
             e->bound_type[s] = BC_DIVIDE;
         }
+        */
         else{
 		    if (g->period == NULL) { /* non-periodic boundary is lateral */
 			e->bound_type[s] = BC_LATERL;
-            if (0){
 
-            if (*DofFaceData(ice_shelf_mask, e->faces[s]) <1.1 && *DofFaceData(ice_shelf_mask, e->faces[s]) > 0) {
-                e->bound_type[s] = (BC_ISHELF | BC_LATERL);
+            if (1){
+            if (ns_params->add_ice_shelf){
+
+                INT v0 = GetFaceVertex(s, 0);
+                INT v1 = GetFaceVertex(s, 1);
+                INT v2 = GetFaceVertex(s, 2);
+                INT local_idx0 = e->verts[v0];
+                INT local_idx1 = e->verts[v1];
+                INT local_idx2 = e->verts[v2];
+
+                if (*DofVertexData(ice_shelf_mask, local_idx0) > 0 && 
+                    *DofVertexData(ice_shelf_mask, local_idx1) > 0 && 
+                    *DofVertexData(ice_shelf_mask, local_idx2) > 0) {
+                
+                    e->bound_type[s] = (BC_ISHELF | BC_LATERL);
+                }
+                else
+                    e->bound_type[s] = (BC_LATERL_GRD | BC_LATERL);
             }
-            else
-                e->bound_type[s] = (BC_LATERL_GRD | BC_LATERL);
             }
             
 			Area[2] += a;
 			continue;
 		    }
+
 		    if (e->bound_type[s] & DIRICHLET)
 			Area[3] += a;
 		    else 
@@ -128,65 +172,16 @@ ice_grid(GRID *g)
      * 
      * ---------------------------------------- */
     ForAllElements(g, e) {
-	//v1 = DofElementData(coord, e->index);
 	for (i = 0; i < NVert; i++) {
 	    v0 = g->verts[e->verts[i]];
-	    //memcpy(v0, v1 + i * Dim, Dim*sizeof(*v0));
         memcpy(v0, DofVertexData(coord, e->verts[i]), Dim*sizeof(*v0));
 	}
     }
 
     phgGeomInit_(g, TRUE);
 
-#if TEST_CASE == ICE_BENCH_E
-    /* for partition */
-    ForAllElements(g, e) {
-	int gid = e->region_mark;
-	e->region_mark = 10 * (gid);
-    }
-#endif
-
-    /*
-    DOF *mask_bot = phgDofNew(g, DOF_P1, 1, "mask bot", DofNoAction);
-
-
-    ForAllElements(g, e)
-    {
-        for (s = 0; s < NFace; s++)
-        {
-            if (e->bound_type[s] & BC_ISHELF)
-            {
-                printf("Ice shelf !!!!\n");
-                for (i = 0; i < 3; i++)
-                {
-                    INT v = GetFaceVertex(s, i);
-                    INT local_idx = e->verts[v];
-
-                    *DofVertexData(mask_bot, local_idx) = 1;
-                    //FLOAT *mask = *DofVertexData(mask_bot, local_idx) = 1;
-                    //mask[0] = 1;
-                }
-            }
-            else if (e->bound_type[s] == (BC_BOTTOM|BC_BOTTOM_GRD))
-            {
-                for (i = 0; i < 3; i++)
-                {
-                    INT v = GetFaceVertex(s, i);
-                    INT local_idx = e->verts[v];
-
-                    FLOAT *mask = DofVertexData(mask_bot, local_idx);
-                    mask[0] = -1;
-                }
-            }
-        }
-    }
-    phgExportVTK(g, "mask.vtk", mask_bot, NULL);
-    */
-
-    phgExportVTK(g, "TEST11.vtk", NULL);
     phgDofFree(&coord);
     phgDofFree(&ice_shelf_mask);
-    //return geo;
     return;
 }
 

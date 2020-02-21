@@ -39,8 +39,10 @@ phgParametersCreate()
     phgOptionsRegisterFilename("nodeZ_file", "Mesh file", (char **)&_p->nodeZ_file);
     phgOptionsRegisterFilename("netcdf_file", "Mesh file", (char **)&_p->nc_file);
     phgOptionsRegisterFilename("bed_txt_file", "Mesh file", (char **)&_p->bed_txt_file);
+    phgOptionsRegisterFilename("bot_txt_file", "Mesh file", (char **)&_p->bot_txt_file);
     phgOptionsRegisterFilename("sur_txt_file", "Mesh file", (char **)&_p->sur_txt_file);
     phgOptionsRegisterFilename("thk_txt_file", "Mesh file", (char **)&_p->thk_txt_file);
+    phgOptionsRegisterFilename("mask_txt_file", "Mesh file", (char **)&_p->mask_txt_file);
     phgOptionsRegisterFilename("x_txt_file", "Mesh file", (char **)&_p->x_txt_file);
     phgOptionsRegisterFilename("y_txt_file", "Mesh file", (char **)&_p->y_txt_file);
     phgOptionsRegisterFilename("sur_grad_x_txt_file", "Mesh file", (char **)&_p->sur_grad_x_txt_file);
@@ -80,9 +82,14 @@ phgParametersCreate()
     phgOptionsRegisterNoArg("start_const_vis", "Start viscosity as constant", &_p->start_const_vis);
     phgOptionsRegisterNoArg("compensate_equ", "Compensate equations", &_p->compensate_equ);
     phgOptionsRegisterNoArg("add_ice_shelf", "add_ice_shelf", &_p->add_ice_shelf);
+    phgOptionsRegisterNoArg("lateral_sia_pres_bc", "lateral_sia_pres_bc", &_p->lateral_sia_pres_bc);
+    phgOptionsRegisterNoArg("another_run_with_updated_mask", "another_run_with_updated_mask", &_p->another_run_with_updated_mask);
     phgOptionsRegisterNoArg("compute_error", "Compute error", &_p->compute_error);
 
     phgOptionsRegisterInt("slip_condition", "slip condition", &_p->slip_condition);
+    phgOptionsRegisterFloat("slip_beta2", "slip beta2", &_p->slip_beta2);
+    phgOptionsRegisterFloat("slip_alpha2", "slip alpha2", &_p->slip_alpha2);
+    phgOptionsRegisterFloat("slip_index", "slip index", &_p->slip_index);
 
 
     phgOptionsRegisterFloat("u_tol0", "u tol0", &_p->u_tol0);
@@ -245,6 +252,8 @@ phgNSCreate(GRID *g, NSParams *ns_params0)
     ns->gn[1] = phgDofNew(g, DOF_ANALYTIC, 3, "gybc", func_g2);
     ns->gn[2] = phgDofNew(g, DOF_ANALYTIC, 3, "gzbc", func_g3);
     _pcd->pbc = phgDofNew(g, ptype, 1, "pressure bc for PCD", DofNoAction);
+
+#if 0
     if (_nsp->enclosed_flow) {
 	if (_nsp->pin_node)
 	    phgDofSetDirichletBoundaryMask(_pcd->pbc, PINNEDNODE);
@@ -255,6 +264,7 @@ phgNSCreate(GRID *g, NSParams *ns_params0)
 	 *   now using more delicated method, and _pcd->pbc is not usesd. */
 	phgDofSetDirichletBoundaryMask(_pcd->pbc, SETFLOW);
     }
+#endif
 
     /* Init surface bases */
     //ns->surf_bas = get_surface_bases(g, utype);
@@ -471,6 +481,7 @@ void phgNSTimeAdvance(NSSolver *ns, FLOAT time, int tstep)
 
 
     /* Pin_node value */
+#if 0
     if (_nsp->pin_node) {
 	adjust_time(- (1. - _nsp->Theta) * ns->dt[0]);
 	phgDofSetBdryDataByFunction(p[1], func_p, PINNEDNODE);
@@ -480,6 +491,7 @@ void phgNSTimeAdvance(NSSolver *ns, FLOAT time, int tstep)
     PERIODIC_SYNC(p[1]);
     PERIODIC_SYNC(T[1]);
     elapsed_time(g, TRUE, phgPerfGetMflops(g, NULL, NULL));
+#endif
 
 
     /* Recompute grad u_{n+1},
@@ -586,6 +598,7 @@ phgNSPinNode(NSSolver *ns)
 	phgError(-1, "Pin verts err!\n");
 
     /* Set pinned node type */
+#if 0
     for (i = 0; i < g->nvert; i++) {
 	if (!(g->types_vert[i] & BDRY_MASK))
 	    continue;
@@ -596,16 +609,19 @@ phgNSPinNode(NSSolver *ns)
 	    break;
 	}
     }
+#endif
     MPI_Barrier(g->comm);
 #endif	/* PIN_AT_ROOT */
 
     /* pinned_node_id = -1 on non-root rank */
+#if 0
     ns->pinned_node_id = pinned_node_id; 
     if (_nsp->pin_node) {
 	adjust_time(- (1. - _nsp->Theta) * ns->dt[0]);
 	phgDofSetBdryDataByFunction(ns->p[1], func_p, PINNEDNODE);
 	restore_time();
     }
+#endif
 
     MPI_Barrier(g->comm);
     return ns->pinned_node_id;

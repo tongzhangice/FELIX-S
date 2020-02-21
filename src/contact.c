@@ -1531,7 +1531,7 @@ get_stress(NSSolver *ns, DOF *gradu, DOF *pressure)
     PetscOptionsInsertFile(MPI_COMM_WORLD, "../options/petsc_cg.opts", PETSC_TRUE); 
 #endif
     //phgOptionsSetOptions(Gu_opts);
-    solver_stress = phgSolverCreate(SOLVER_DEFAULT, stress0, NULL);
+    solver_stress = phgSolverCreate(SOLVER_SUPERLU, stress0, NULL);
     solver_stress->verb = 0;
     phgVerbosity = 0;
     phgOptionsPop();
@@ -1953,7 +1953,7 @@ INT if_update_shelf_mask(NSSolver *ns)
         get_water_force(ns);
         get_contact_force(ns);
         ns->stress_nn = ns->contact_force;
-        //get_smooth_surface_values(ns, ns->stress_nn, 0);
+        get_smooth_surface_values(ns, ns->stress_nn, 0);
     }
 
     if (contact_method == 2)

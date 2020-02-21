@@ -3,11 +3,10 @@
  * poly17: dx0 = 50 m, dy = 1km, nx = 740, ny = 51
  */
 
-//static double *data_sur, *data_thk, **data_x, **data_y;
-static int NX = 17, NY = 114;
+static double *data_sur, *data_thk, *data_bot, **data_x, **data_y;
+static int NX = 160, NY = 3;
 
-static double **data_bed, **data_sur, **data_thk, **data_mask, **data_x, **data_y;
-static double **data_sur_grad_x, **data_sur_grad_y;
+//static double **data_bot, **data_sur, **data_thk, **data_x, **data_y;
 //double** read_txt_data(char *file_name);
 //void interp_txt_data(double **data, double x, double y, double z, double *a);
 
@@ -15,19 +14,23 @@ void
 iceInit(GRID *g, LAYERED_MESH **gL_ptr)
 {
 //    SIMPLEX *e;
-    int i, j;
     LAYERED_MESH *gL;
+    //GEO_INFO *geo = (GEO_INFO *) phgCalloc(1, sizeof(*geo));    
     
     // read data
-    data_bed = read_txt_data(ns_params->bed_txt_file);
-    data_sur = read_txt_data(ns_params->sur_txt_file);
-    data_thk = read_txt_data(ns_params->thk_txt_file);
-    data_sur_grad_x = read_txt_data(ns_params->sur_grad_x_txt_file);
-    data_sur_grad_y = read_txt_data(ns_params->sur_grad_y_txt_file);
+    //data_bed = read_txt_data(ns_params->bed_txt_file);
+    //data_sur = read_txt_data_1D(ns_params->sur_txt_file);
+    //data_thk = read_txt_data_1D(ns_params->thk_txt_file);
+    //data_bot = read_txt_data_1D(ns_params->bot_txt_file);
+    //data_sur = read_txt_data(ns_params->sur_txt_file);
+    //data_thk = read_txt_data(ns_params->thk_txt_file);
+    //data_bot = read_txt_data(ns_params->bed_txt_file);
+
+    data_x = read_txt_data(ns_params->x_txt_file);
+    data_y = read_txt_data(ns_params->y_txt_file);
 
 
     ice_grid(g);
-    phgExportVTK(g, "ice_domain.vtk", NULL);
     
     //free(data_bed[0]);
     //free(data_bed);
@@ -74,156 +77,78 @@ iceInit(GRID *g, LAYERED_MESH **gL_ptr)
     }
     
     
-    for (i = 0; i < gL->nvert; i++) {
-    gL->verts[i][0] *= 1000; 
-    gL->verts[i][1] *= 1000; 
-    //gL->verts[ii][2] *= 1000; 
-    }
-
+   int ii;
+  for (ii = 0; ii < gL->nvert; ii++) {
+        gL->verts[ii][0] *= 1000; 
+        gL->verts[ii][1] *= 1000; 
+        //gL->verts[ii][2] *= 1000; 
+            }
     TRIA *t = gL->trias;
-    for (i = 0; i < gL->ntria; i++, t++) {
-    t->area *= 1000*1000;
-    } 
+    for (ii = 0; ii < gL->ntria; ii++, t++) {
+          t->area *= 1000*1000;
+      } 
 
     *gL_ptr = gL;
-
+    //return geo;
     return;
+
 
 }
 
 
+#if 1
 void
 func_ice_slab(FLOAT x, FLOAT y, FLOAT z, FLOAT *coord)
 {
-
-	double bed, sur, thk;
+	double bed, sur, thk, bot;
     x *= 1000;
     y *= 1000;    
-	interp_txt_data(data_bed, x, y, z, &bed);
-	interp_txt_data(data_sur, x, y, z, &sur);
-	interp_txt_data(data_thk, x, y, z, &thk);
+    bed = -100 - x/1000 ;
+	//interp_txt_data_1D(data_sur, x, y, z, &sur);
+	//interp_txt_data_1D(data_thk, x, y, z, &thk);
+	//interp_txt_data_1D(data_bot, x, y, z, &bot);
+
+    thk = 500;
+
+    /*
+    if (x<=519850)
+        bot = bed;
+    else
+        bot = sur - thk;
+        */
 
 	if (thk < 1e-10 && thk >= 0) {
-	  //printf("thk zero, change to 1m\n.");
-      //printf("sur: %lf, bed: %lf\n", sur, bed);
+	  printf("thk zero, change to 1m\n.");
+      printf("sur: %lf, bed: %lf\n", sur, bed);
 	  thk = 1;
 	}
 
 	coord[0] = x;
 	coord[1] = y; 
-	coord[2] = sur - (1-z)*thk;
+	coord[2] = bed + z*thk;
     
 }
+#endif
+
+
 
 
 
 void
 func_ice_shelf_mask(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_shelf_mask)
 {
-    double bed, sur, thk;
-    //double **data_bed, **data_sur, **data_thk;
     x *= 1000;
     y *= 1000;    
-	interp_txt_data(data_bed, x, y, z, &bed);
-	interp_txt_data(data_sur, x, y, z, &sur);
-	interp_txt_data(data_thk, x, y, z, &thk); 
-    
-    if ((sur-thk-bed)>1){
-        ice_shelf_mask[0] = 1;
+
+    if (x>519600){ 
+        *ice_shelf_mask = 1;
     }
     else
-        ice_shelf_mask[0] = 0;
+        *ice_shelf_mask = 0;
 }
 
 
 
-
-
-/*
-void
-func_ice_shelf_pres(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_shelf_pres)
-{
-    double bed, sur, thk;
-    x *= 1000;
-    y *= 1000;    
-	interp_txt_data(data_bed, x, y, z, &bed);
-	interp_txt_data(data_sur, x, y, z, &sur);
-	interp_txt_data(data_thk, x, y, z, &thk); 
-    
-    if ((sur-thk-bed)>0.00001){
-        ice_shelf_pres[0] = -1000*9.8*(sur-thk)/10e5;
-        if (ice_shelf_pres[0]<0){
-            ice_shelf_pres[0]=0;
-        }
-    }
-    else
-        ice_shelf_pres[0] = 0; 
-}
-*/
-
-void
-func_sur_grad_x(FLOAT x, FLOAT y, FLOAT z, FLOAT *sur_grad_x)
-{
-
-    double sur_grad;
-    x *= 1000;
-    y *= 1000;    
-	interp_txt_data(data_sur_grad_x, x, y, z, &sur_grad); 
-    sur_grad_x[0] = sur_grad;
-}
-void
-func_sur_grad_y(FLOAT x, FLOAT y, FLOAT z, FLOAT *sur_grad_y)
-{
-
-    double sur_grad;
-    x *= 1000;
-    y *= 1000;    
-	interp_txt_data(data_sur_grad_y, x, y, z, &sur_grad); 
-    sur_grad_y[0] = sur_grad;
-}
-void
-func_ice_sur(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_sur)
-{
-    double sur;
-    x *= 1000;
-    y *= 1000;
-    interp_txt_data(data_sur, x, y, z, &sur);
-    ice_sur[0] = sur;
-}
-void
-func_bed_z(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_bed)
-{
-    double bed;
-    x *= 1000;
-    y *= 1000;
-    interp_txt_data(data_bed, x, y, z, &bed);
-    ice_bed[0] = bed;
-}
-void
-func_ice_thk(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_thk)
-{
-    double thk;
-    x *= 1000;
-    y *= 1000;
-    interp_txt_data(data_thk, x, y, z, &thk);
-    ice_thk[0] = thk;
-}
-
-/*
-FLOAT
-func_ice_slabH(FLOAT x, FLOAT y)
-{
-    FLOAT Hz, z = 0;
-    x *= GRID_SCALING / LEN_SCALING;
-    y *= GRID_SCALING / LEN_SCALING;
-
-    nc_data_set_active(data_index_thk);
-    nc_data_scaling = 1. / LEN_SCALING;;
-    interp_nc_data(x, y, z, &Hz);
-    
-    return Hz;
-}
-*/
 
 
 
@@ -278,8 +203,8 @@ get_effective_viscosity(const FLOAT *gu, FLOAT T, FLOAT p,
     A = a1 * exp(-Q1 / R / T);
     A *= SEC_PER_YEAR;
 #else
-#  warning const vis A = 6.338e-25 mismip+ setting
-    A = 0.3*6.338e-25*SEC_PER_YEAR;
+#  warning const vis A = 1e-16
+    A = 1e-25*SEC_PER_YEAR;
 #endif
 
     if (viscosity_type == VIS_CONST) {
@@ -386,7 +311,7 @@ void func_beta(FLOAT x, FLOAT y, FLOAT z, FLOAT *beta)
     /* nc_data_scaling = 1.; */
     /* interp_nc_data(x, y, 0, beta); */
 
-    *beta = 1e3;
+    *beta = 1e4;
     //return;
 }
 
@@ -430,14 +355,14 @@ set_boundary_mask(NSSolver *ns)
 {
 #if !USE_SLIDING_BC
 #   warning BD mask set to (x,x,x)
-    BTYPE DB_masks[3] = {BC_BOTTOM_GRD|BC_LATERL_GRD,
-			 BC_BOTTOM_GRD|BC_LATERL_GRD,
-			 BC_BOTTOM_GRD|BC_LATERL_GRD};
+    BTYPE DB_masks[3] = {BC_BOTTOM|BC_DIVIDE|BC_LATERL|BC_TERMNS,
+			 BC_BOTTOM|BC_DIVIDE|BC_LATERL|BC_TERMNS,
+			 BC_BOTTOM|BC_DIVIDE|BC_LATERL|BC_TERMNS};
 #else
-#   warning BD mask set to (x,0,0)
-    BTYPE DB_masks[3] = {BC_LATERL_GRD|BC_BOTTOM_GRD,
-			 BC_LATERL_GRD, 
-			 BC_LATERL_GRD};
+#   warning BD mask set to (x,x,0)
+    BTYPE DB_masks[3] = {BC_DIVIDE|BC_BOTTOM_GRD|BC_BOTTOM_GRD_ADD,
+			 BC_DIVIDE|BC_LATERL|BC_BOTTOM_GRD_ADD, 
+			 BC_BOTTOM_GRD_ADD};
 #endif
 
     phgDofSetDirichletBoundaryMasks(ns->u[1], DB_masks);
@@ -481,6 +406,16 @@ void func_smb_slf(FLOAT x, FLOAT y, FLOAT z, FLOAT *value)
     *value = 0;
 }
 
+void func_bed_z(FLOAT x, FLOAT y, FLOAT z, FLOAT *bed_z)
+{
+    FLOAT bed;
+    //*bed_z = 720 - 1.038e-3*x;
+    *bed_z = -100 - x/1000.0;
+    //bed = 3000 - 0.001*x;
+    
+    //bed_zzz[0] = bed;
+    //printf("bed: %f %f\n", *bed_z, x);
+}
 
 void load_dH_from_file(NSSolver *ns, DOF *dof_P1, int up_or_lower)
 {
@@ -554,11 +489,11 @@ void load_dH_from_file(NSSolver *ns, DOF *dof_P1, int up_or_lower)
     {
         for (j = 0; j < ny; j++)
         {
-            if (fabs(gL->verts[i][1] - data_y[0][j]) < 1e-1)
+            if (fabs(gL->verts[i][1] - data_y[j][0]) < 1e-1)
             {
                 for (k = 0; k < nx; k++)
                 {
-                    if (fabs(gL->verts[i][0]-data_x[k][0]) < 1e-1)
+                    if (fabs(gL->verts[i][0]-data_x[0][k]) < 1e-1)
                     {
                             nsv0[i] = m_avg[k][j];
                     }
@@ -675,12 +610,12 @@ void save_free_surface_velo(NSSolver *ns, int which_dim, int up_or_lower)
     {
         for (j = 0; j < ny; j++)
         {
-            if (fabs(gL->verts[i][1] - data_y[0][j]) < 1e-1)
+            if (fabs(gL->verts[i][1] - data_y[j][0]) < 1e-1)
             {
                 for (k = 0; k < nx; k++)
                 {
                     //printf("%f %f\n", gL->verts[i][0], data_x[0][k]);
-                    if (fabs(gL->verts[i][0]-data_x[k][0]) < 1e-1)
+                    if (fabs(gL->verts[i][0]-data_x[0][k]) < 1e-1)
                     {
                         snv[k][j] = nsv0[i];
                         //printf("nsv: %f %d %d %d\n", nsv0[i], i, j, k);
@@ -810,12 +745,12 @@ void save_free_surface_elev(NSSolver *ns, int up_or_lower)
     {
         for (j = 0; j < ny; j++)
         {
-            if (fabs(gL->verts[i][1] - data_y[0][j]) < 1e-1)
+            if (fabs(gL->verts[i][1] - data_y[j][0]) < 1e-1)
             {
                 for (k = 0; k < nx; k++)
                 {
                     //printf("%f %f\n", gL->verts[i][0], data_x[0][k]);
-                    if (fabs(gL->verts[i][0]-data_x[k][0]) < 1e-1)
+                    if (fabs(gL->verts[i][0]-data_x[0][k]) < 1e-1)
                     {
                         snv[k][j] = nsv0[i];
                         //printf("nsv: %f %d %d %d\n", nsv0[i], i, j, k);
@@ -1035,6 +970,7 @@ void get_smooth_surface_values(NSSolver *ns, DOF *dof_P1, int up_or_lower)
         {
             if (fabs(gL->verts[i][1] - data_y[0][j]) < 1e-1)
             {
+
                 for (k = 0; k < nx; k++)
                 {
                     if (fabs(gL->verts[i][0]-data_x[k][0]) < 1e-1)
@@ -1078,3 +1014,4 @@ void get_smooth_surface_values(NSSolver *ns, DOF *dof_P1, int up_or_lower)
      } 
 
 }
+

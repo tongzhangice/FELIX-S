@@ -46,7 +46,7 @@
 
 /* Sliding B.C. */
 #define USE_NODAL_LOADS 1
-#define USE_SLIDING_BC 0
+#define USE_SLIDING_BC 1
 #define CASE_DRAINAGE_BASIN 0
 #define ZERO_TRACT_ZONE 0
 #define SLIP_BDRY BC_BOTTOM
@@ -105,9 +105,13 @@
 #define ICE_EXACT      130
 #define ICE_GREEN_LAND 200
 #define TEST 201
+#define LAS 202
+#define LAT_PRES_BC 203
+#define ICE_SHELF_BUTS_2D 204
+#define SLAB 205
 
-#define TEST_CASE TEST
-#define NS_PROBLEM "test"
+#define TEST_CASE LAS
+#define NS_PROBLEM "LAS"
 
 
 /* Bench test */
@@ -176,6 +180,21 @@
 #  define LEN_SCALING 1
 #  define PRES_SCALING 1e5
 #  define EQU_T_SCALING 1e12
+#elif TEST_CASE == LAT_PRES_BC
+#  define EQU_SCALING 1e-5
+#  define LEN_SCALING 1
+#  define PRES_SCALING 1e5
+#  define EQU_T_SCALING 1e12
+#elif TEST_CASE == ICE_SHELF_BUTS_2D
+#  define EQU_SCALING 1e-5
+#  define LEN_SCALING 1
+#  define PRES_SCALING 1e5
+#  define EQU_T_SCALING 1e12
+#elif TEST_CASE == SLAB
+#  define EQU_SCALING 1e-5
+#  define LEN_SCALING 1
+#  define PRES_SCALING 1e5
+#  define EQU_T_SCALING 1e12
 #elif TEST_CASE == ICE_EXACT
 #  define EQU_SCALING 1e-8
 #  define LEN_SCALING 1e3
@@ -214,11 +233,12 @@
 #define SETFLOW      (BC_BOTTOM)
 #define BC_DIVIDE    (BDRY_USER2)
 #define BC_TERMNS    (BDRY_USER4)
+#define BC_BOTTOM_GRD_ADD (BDRY_USER6)
 
 #define INFLOW  BC_BOTTOM
 #define OUTFLOW BC_TOP
 
-#define PINNEDNODE   (BDRY_USER6)
+//#define PINNEDNODE   (BDRY_USER6)
 
 typedef enum { PICARD, NEWTON } LTYPE;	/* linearization type */
 
@@ -253,6 +273,8 @@ typedef struct NSParams_ {
     BOOLEAN start_const_vis;	  /* Viscosity start at constant */
     BOOLEAN compensate_equ;	  /* Compensate euqations */
     BOOLEAN add_ice_shelf;	  /* add ice shelf part */
+    BOOLEAN lateral_sia_pres_bc;	  /* add lateral bc with SIA pressure */
+    BOOLEAN another_run_with_updated_mask;	  /* if do another_run_with_updated_mask */
     int Nx, Ny, Nz;		  /* Structured mesh size */
 
     INT periodicity;		  /* periodicity */
@@ -265,6 +287,9 @@ typedef struct NSParams_ {
     FLOAT fp_scale;		  /* Dirichlet scale for Fp */
 
     INT slip_condition;
+    FLOAT slip_beta2;
+    FLOAT slip_alpha2; 
+    FLOAT slip_index;
 
     /* Discrete scheme */
     INT height_scheme;		  /* Height solver scheme */
@@ -339,6 +364,8 @@ typedef struct NSParams_ {
     char *nodeZ_file;
     char *dual_file;
     char *bed_txt_file;
+    char *bot_txt_file;
+    char *mask_txt_file;
     char *sur_txt_file;
     char *thk_txt_file;
     char *x_txt_file;
@@ -483,6 +510,10 @@ typedef struct NSSolver_ {
     /* Depth */
     DOF *depth_P1;		/* Depth P1 */
     DOF *depth_P2; 		/* Depth P2 */
+
+    DOF *surf_elev_P1;
+    DOF *bot_elev_P1;
+    DOF *grad_surf_elev;
 
     /* Variables */
     FLOAT non_res;		  /* nonlinear residual */
@@ -855,7 +886,7 @@ void struct_mesh_update(NSSolver *ns, int tstep, double t);
     elapsed_time(__VA_ARGS__);
     
 
-#if 0
+#if 1
 #define DOF_SCALE(u, desp) {}
 #elif 0
 # define DOF_SCALE(u, desp)					\
@@ -867,7 +898,7 @@ void struct_mesh_update(NSSolver *ns, int tstep, double t);
 	      phgDofMinValVec(u),				\
 	      phgDofMaxValVec(u)				\
 	      );						
-#elif 1
+#elif 0
 # define DOF_SCALE(u, description) {				\
 	char trimed[100];					\
 	strncpy(trimed, __FUNCTION__, 8);			\
@@ -977,3 +1008,5 @@ void load_dH_from_file(NSSolver *ns, DOF *dof_P1, int up_or_lower);
 void save_free_surface_velo(NSSolver *ns, int which_dim, int up_or_lower);
 void save_free_surface_elev(NSSolver *ns, int up_or_lower);
 void modify_mask_bot(NSSolver *ns);
+void get_surf_bot_elev(NSSolver *ns);
+FLOAT get_f_factor(FLOAT x);

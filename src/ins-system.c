@@ -10,9 +10,37 @@
 #define SIGN_FRICTION -1
 #define SIGN_STAB -1.
 
+
 static double m_idx = 1.0/3;
 //static double C_mtp = 31651.7551654794; //1.0e7/pow(SEC_PER_YEAR, 1.0/3);
 static double C_mtp = 31651.7551654794; //1.0e7/pow(SEC_PER_YEAR, 1.0/3);
+//static double C_mtp = 1.0e4; //1.0e7/pow(SEC_PER_YEAR, 1.0/3);
+
+FLOAT get_f_factor(FLOAT x)
+{
+
+    FLOAT f_factor;
+    //f_factor = ((0.8-0.2*exp(-(x-519600)*(x-519600)/1e10)));
+    
+    
+    /*
+    if (x < 519600)
+        f_factor = 0.5+0.5/8.0e5*x;
+    else
+    {
+        f_factor = 0.5+0.5/8.0e5*x;
+    }
+    */
+            
+    f_factor = 0.5;
+
+    /*
+    if (abs(x-550000)<2e3)
+        f_factor = f_factor + 0.001;
+        */
+    
+    return f_factor;
+}
 
 FLOAT *get_bas_dot_normal(const FLOAT *bas, const FLOAT *normal, INT i_e, INT j_e)
 {
@@ -161,9 +189,19 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 
 	p = quad->points;
 	w = quad->weights;
+    int v0, v1, v2, v3;
+    FLOAT lambda[Dim+1];
+    FLOAT x,y,z;
 	for (q = 0; q < quad->npoints; q++) {
 	    phgGeomGetCurvedJacobianAtLambda(g, e, p, &det);
 	    vol = fabs(det / 6.);
+
+           GetElementVertices(e, 0, v0, v1, v2, v3);
+			lambda[v0] = *(p++);
+			lambda[v1] = *(p++);
+			lambda[v2] = *(p++);
+			lambda[v3] = *(p++);
+			phgGeomLambda2XYZ(g, e, lambda, &x, &y, &z);
 
 	    /* rhs u */
 	    for (i = 0; i < M; i++) {
@@ -182,7 +220,8 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 
 		    if (k == Z_DIR) { 
 			const FLOAT rho = RHO_ICE;
-			const FLOAT grav = GRAVITY;
+            FLOAT f_factor = get_f_factor(x);
+			const FLOAT grav = GRAVITY*f_factor;
 			const FLOAT a = SEC_PER_YEAR;
 			const FLOAT f = rho*grav * LEN_SCALING2 * EQU_SCALING; 
 
@@ -263,6 +302,9 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 		    w = quad->weights;
 		    for (q = 0; q < quad->npoints; q++) {
 			FLOAT vu[Dim];
+            FLOAT ub_mag, surf_elev, bot_elev, thickness, effective_pressure;
+            FLOAT alpha2, beta2, mindex;
+
 			lambda[v0] = *(p++);
 			lambda[v1] = *(p++);
 			lambda[v2] = *(p++);
@@ -270,6 +312,20 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 			phgGeomLambda2XYZ(g, e, lambda, &x, &y, &z);
 			func_beta(x, y, z, &beta);
 			phgDofEval(ns->u[1], e, lambda, vu);
+            phgDofEval(ns->surf_elev_P1, e, lambda, &surf_elev);
+            phgDofEval(ns->bot_elev_P1, e, lambda, &bot_elev);
+
+            thickness = surf_elev - bot_elev;
+
+            effective_pressure = RHO_ICE*GRAVITY*(thickness - MAX(0, -RHO_WAT/RHO_ICE*bot_elev));
+            
+            ub_mag = pow(INNER_PRODUCT(vu,vu)+1e-10,0.5);
+
+            alpha2 = _nsp->slip_alpha2;
+            beta2 = _nsp->slip_beta2;
+            mindex = _nsp->slip_index;
+
+
 
             FLOAT C_mtp1;
 
@@ -277,7 +333,7 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
            if (Time < 10000)
                C_mtp1 = C_mtp;
            else
-               C_mtp1 = C_mtp*(1 - 0.75*exp(-pow(x-528000, 2)/(2.0*225e8) - y*y/(2.0*1e8)));
+               C_mtp1 = (_nsp->slip_beta2)*(1 - 0.75*exp(-pow(x-528000, 2)/(2.0*225e8) - y*y/(2.0*1e8)));
 
 
 			const FLOAT *gi_u = 
@@ -290,8 +346,11 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 				    rhsu[ii][k] += -area*(*w) * beta * vu[k] * (gi_u[ii]) * EQU_SCALING * LEN_SCALING;
                 else if (_nsp->slip_condition == 1)
 				    rhsu[ii][k] += -area*(*w) * C_mtp1 * pow(INNER_PRODUCT(vu, vu)+1e-10, (m_idx-1)/2.0) * vu[k] * gi_u[ii] * EQU_SCALING * LEN_SCALING;
+                else if (_nsp->slip_condition == 2)
+				    rhsu[ii][k] += -area*(*w) * beta2 * pow(ub_mag, 1.0/mindex) * alpha2 * effective_pressure/pow(pow(beta2, mindex) * ub_mag + pow(alpha2 * effective_pressure, mindex),1.0/mindex) / ub_mag * vu[k] * gi_u[ii] * EQU_SCALING * LEN_SCALING;
+
                 else
-                    phgPrintf("Wrong sliding law ! slip_condition should be 0 or 1");
+                    phgPrintf("Wrong sliding law ! slip_condition should be 0, 1 or 2");
 			    }
 			}     /* end of bas_i */
 			w++;
@@ -351,10 +410,83 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 
 	                       /* end out flow boundary */
 
+        if (_nsp->lateral_sia_pres_bc){
+        for (s = 0; s < NFace; s++) {
+
+        if ((e->bound_type[s] & BC_LATERL) && 
+           !(e->bound_type[s] & BC_ISHELF))
+       { 
+        int v0, v1, v2;
+        int nbas_face = NbasFace(ns->u[1]);
+        SHORT bases[nbas_face];
+        FLOAT lambda[Dim + 1], x,y,z;
+        order = DofTypeOrder(ns->u[1], e) * 3 - 1;
+        /* DofTypeOrder get the u type order, i.e. 2 */
+
+        phgDofGetBasesOnFace(ns->u[1], e, s, bases);
+        v0 = GetFaceVertex(s, 0);
+        v1 = GetFaceVertex(s, 1);
+        v2 = GetFaceVertex(s, 2);
+        /* v0, v1, v2 are the vertex no in the element */
+        lambda[s] = 0.;
+        
+        area = phgGeomGetFaceArea(g, e, s);
+        normal = phgGeomGetFaceOutNormal(g, e, s);
+        quad = phgQuadGetQuad2D(order);
+        
+        p = quad->points;
+        w = quad->weights;
+
+        for (q = 0; q < quad->npoints; q++) {
+            FLOAT surf_elev;
+            FLOAT grad_surf_elev[Dim];
+
+            lambda[v0] = *(p++);
+            lambda[v1] = *(p++);
+            lambda[v2] = *(p++);
+        
+            phgGeomLambda2XYZ(g, e, lambda, &x, &y, &z);
+
+            phgDofEval(ns->surf_elev_P1, e, lambda, &surf_elev);
+            //phgDofEval(ns->grad_surf_elev, e, lambda, &grad_surf_elev[0]);
+
+            FLOAT dsdx, dsdy;
+
+            //func_sur_grad_x(x, y, z, &dsdx);
+            //func_sur_grad_y(x, y, z, &dsdy);
+
+            FLOAT f_factor = get_f_factor(x);
+
+            for (i = 0; i < nbas_face; i++) {
+            int ii = bases[i];
+            FLOAT gi_u = 
+                *ns->u[1]->type->BasFuncs(ns->u[1], e, ii, ii + 1, lambda);
+
+            for (k = 0; k < Dim; k++) {
+            if (k < Dim-1) {
+
+                rhsu[ii][k] += -area* (*w) * RHO_ICE * GRAVITY*f_factor * (surf_elev - z)
+                               * normal[k] * (gi_u) * LEN_SCALING * EQU_SCALING;
+            }
+
+            else {
+              rhsu[ii][k] += -area*(*w) * RHO_ICE*GRAVITY*f_factor* (surf_elev - z)
+                           *(normal[k-2]*(dsdx)+ normal[k-1]*(dsdy))
+                           * (gi_u) * LEN_SCALING*EQU_SCALING;
+
+            }
+            }
+            }     /* end of bas_i */
+            w++;
+        } /* end of quad point */
+        }
+		}
+        }
 
         if (_nsp->add_ice_shelf) {
 		for (s = 0; s < NFace; s++) {
-		    if (e->bound_type[s] & BC_ISHELF) {
+		    if ((e->bound_type[s] & BC_ISHELF)/* && !(e->bound_type[s] & BC_LATERL)*/)
+            {
 		
             FLOAT lambda[Dim+1], lambda_x, lambda_y, lambda_z;
             INT quad_order = 5;
@@ -365,10 +497,12 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
             FLOAT *w = quad->weights;
             FLOAT area = phgGeomGetFaceArea(g, e, s);
             //FLOAT *normal = phgGeomGetFaceOutNormal(g, e, s);
-		FLOAT normal[Dim];
+            FLOAT normal[Dim];
 
-		FLOAT nx, ny, nz;
+            FLOAT nx, ny, nz;
+
             INT M_face = 3*(ns->du->type->np_vert + ns->du->type->np_edge);
+
             SHORT bas_idx_e[M_face];
 
             phgDofGetBasesOnFace(ns->du, e, s, bas_idx_e);
@@ -397,13 +531,21 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
                 phgDofEval(ns->u[1], e, lambda, vu);
 #if 1
                 phgDofEval(avg_n, e, lambda, avg_n_v);
-		normal[0] = avg_n_v[0];
-		normal[1] = avg_n_v[1];
-		normal[2] = avg_n_v[2];
+                normal[0] = avg_n_v[0];
+                normal[1] = avg_n_v[1];
+                normal[2] = avg_n_v[2];
+            if (fabs(normal[2]) < 1.0e-8)
+            {
+                Ns = 1.0e50;
+            }
+            else
                 Ns = sqrt(1+SQUARE(normal[0]/normal[2])+SQUARE(normal[1]/normal[2]));
+
 #endif
                 
                 const FLOAT *bas = ns->du->type->BasFuncs(ns->du, e, 0, -1, lambda);
+
+                FLOAT f_factor = get_f_factor(lambda_x);
 
                 for (i = 0; i < M_face; i++)
                 {
@@ -416,7 +558,7 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
                     {
                         if (lambda_z < 0)
                         {
-                            rhsu[i_e][k] += area*w[q]*RHO_WAT*GRAVITY*
+                            rhsu[i_e][k] += area*w[q]*RHO_WAT*GRAVITY*f_factor*
                                 (lambda_z-(INNER_PRODUCT(vu, normal)-0)*Ns*dt1)*bas[i_e]
                                 *normal[k]*EQU_SCALING;
                         }
@@ -430,6 +572,7 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 
 		for (s = 0; s < NFace; s++) {
 		    if (e->bound_type[s] & BC_TERMNS) {
+		    //if (e->bound_type[s] == (BC_LATERL | BC_ISHELF)){
 		
             FLOAT lambda[Dim+1], lambda_x, lambda_y, lambda_z;
             INT quad_order = 5;
@@ -440,7 +583,8 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
             FLOAT *w = quad->weights;
             FLOAT area = phgGeomGetFaceArea(g, e, s);
             const FLOAT *normal = phgGeomGetFaceOutNormal(g, e, s);
-		FLOAT nx1, ny1, nz1;
+
+            FLOAT nx1, ny1, nz1;
 
             INT M_face = 3*(ns->du->type->np_vert + ns->du->type->np_edge);
             SHORT bas_idx_e[M_face];
@@ -466,6 +610,8 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
                 
                 const FLOAT *bas = ns->du->type->BasFuncs(ns->du, e, 0, -1, lambda);
 
+                FLOAT f_factor = get_f_factor(lambda_x);
+
                 for (i = 0; i < M_face; i++)
                 {
                     INT i_e = bas_idx_e[i];
@@ -474,9 +620,10 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
                     {
                         if (lambda_z < 0)
                         {
-                            rhsu[i_e][k] += area*w[q]*RHO_WAT*GRAVITY*
+                            rhsu[i_e][k] += area*w[q]*RHO_WAT*GRAVITY*f_factor*
                                 (lambda_z)*bas[i_e]
                                 *normal[k]*EQU_SCALING;
+                            /* I add a multiplier factor 2 for testing the melange impact */
                         }
                         else
                             rhsu[i_e][k] += 0;
@@ -579,9 +726,11 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 	phgDofFree(&avg_n);
     
     phgVecAssemble(vec_rhs);
+
 #if USE_NODAL_LOADS
     phgVecAssemble(ns->vec_rhs0);
 #endif
+
     phgVecAssemble(solver_u->rhs);
     phgVecAXPBY(1., vec_rhs, 0, &solver_u->rhs);
     solver_u->rhs_updated = FALSE;
@@ -730,7 +879,8 @@ phgNSBuildSolverUMat(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 	phgPrintf("   LinearType: Newton");
 
 	DOF *avg_n = phgDofNew(ns->g, DOF_P2, 3, "avg_n", DofNoAction);
-        get_avg_n(ns->g, avg_n);
+
+    get_avg_n(ns->g, avg_n);
 
     ForAllElements(g, e) {
 
@@ -877,10 +1027,32 @@ phgNSBuildSolverUMat(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 			lambda[v0] = *(p++);
 			lambda[v1] = *(p++);
 			lambda[v2] = *(p++);
+            FLOAT ub_mag, surf_elev, bot_elev, thickness, effective_pressure;
+            FLOAT alpha2, beta2, mindex;
+
+            //FLOAT depth;
 			
 			phgGeomLambda2XYZ(g, e, lambda, &x, &y, &z);
 			func_beta(x, y, z, &beta);
 			phgDofEval(ns->u[1], e, lambda, vu);
+
+
+            phgDofEval(ns->surf_elev_P1, e, lambda, &surf_elev);
+            phgDofEval(ns->bot_elev_P1, e, lambda, &bot_elev);
+            //phgDofEval(ns->depth_P1, e, lambda, &depth);
+
+            thickness = surf_elev - bot_elev;
+
+            //phgPrintf("depth, thickness %f %f\n", depth, thickness);
+
+            effective_pressure = RHO_ICE*GRAVITY*(thickness - MAX(0, -RHO_WAT/RHO_ICE*bot_elev));
+            
+            ub_mag = pow(INNER_PRODUCT(vu,vu)+1e-10,0.5);
+
+            alpha2 = _nsp->slip_alpha2;
+            beta2 = _nsp->slip_beta2;
+            mindex = _nsp->slip_index;
+			
             
            //FLOAT  C_mtp1 = C_mtp*(1 - 0.75*exp(-pow(x-522296, 2)/(2.0*225e8) - y*y/(2.0*1e8)));
 
@@ -901,9 +1073,16 @@ phgNSBuildSolverUMat(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
                 if (_nsp->slip_condition == 0)
 				    mass_face = area*(*w) * beta * (gi_u[jj])*(gi_u[ii])* EQU_SCALING * LEN_SCALING;
                 else if (_nsp->slip_condition == 1)
-				    mass_face = area*(*w) * C_mtp1 * pow(INNER_PRODUCT(vu, vu)+1e-10, (m_idx-1)/2.0) * gi_u[jj] * gi_u[ii] * EQU_SCALING * LEN_SCALING;
+				    mass_face = area*(*w) * C_mtp1 * 
+                        pow(INNER_PRODUCT(vu, vu)+1e-10, (m_idx-1)/2.0) * 
+                        gi_u[jj] * gi_u[ii] * EQU_SCALING * LEN_SCALING;
+                else if (_nsp->slip_condition == 2)
+				    mass_face = area*(*w) * beta2 * pow(ub_mag, 1.0/mindex) * alpha2 * 
+                        effective_pressure/pow(pow(beta2, mindex) * ub_mag + 
+                                pow(alpha2 * effective_pressure, mindex),1.0/mindex)/ub_mag * 
+                        gi_u[jj] * gi_u[ii] * EQU_SCALING * LEN_SCALING;
                 else
-                    phgPrintf("Wrong sliding law ! The slip_condition should be 0 or 1");
+                    phgPrintf("Wrong sliding law ! The slip_condition should be 0, 1 or 2");
 
 				for (k = 0; k < Dim; k++) 
 				{
@@ -919,7 +1098,7 @@ phgNSBuildSolverUMat(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 
     for (s = 0; s < NFace; s++)
         {
-            if (e->bound_type[s] & BC_ISHELF)
+            if ((e->bound_type[s] & BC_ISHELF)/* && !(e->bound_type[s] & BC_LATERL)*/)
             {
                 FLOAT lambda[Dim+1], lambda_x, lambda_y, lambda_z;
                 INT quad_order = 5;
@@ -928,13 +1107,13 @@ phgNSBuildSolverUMat(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
                 FLOAT *w = quad->weights;
                 FLOAT *p = quad->points;
 
-		FLOAT avg_n_v[Dim];
+                FLOAT avg_n_v[Dim];
 
-		FLOAT nx, ny, nz;
+                FLOAT nx, ny, nz;
 
                 FLOAT area = phgGeomGetFaceArea(g, e, s);
                 //FLOAT *normal = phgGeomGetFaceOutNormal(g, e, s);
-		FLOAT normal[Dim];
+                FLOAT normal[Dim];
 
                 INT v0 = GetFaceVertex(s, 0);
                 INT v1 = GetFaceVertex(s, 1);
@@ -963,11 +1142,16 @@ phgNSBuildSolverUMat(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
                     
                     phgGeomLambda2XYZ(g, e, lambda, &lambda_x, &lambda_y, &lambda_z);
 
-                phgDofEval(avg_n, e, lambda, avg_n_v);
-		normal[0] = avg_n_v[0];
-		normal[1] = avg_n_v[1];
-		normal[2] = avg_n_v[2];
-	        Ns = sqrt(1+SQUARE(normal[0]/normal[2])+SQUARE(normal[1]/normal[2]));
+                    phgDofEval(avg_n, e, lambda, avg_n_v);
+                    normal[0] = avg_n_v[0];
+                    normal[1] = avg_n_v[1];
+                    normal[2] = avg_n_v[2];
+                if (fabs(normal[2]) < 1.0e-8)
+                {
+                    Ns = 1.0e50;
+                }
+                else
+                    Ns = sqrt(1+SQUARE(normal[0]/normal[2])+SQUARE(normal[1]/normal[2]));
                     
                     const FLOAT *bas = ns->du->type->BasFuncs(ns->du, e, 0, -1, lambda);
                     
@@ -987,6 +1171,9 @@ phgNSBuildSolverUMat(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
                             const FLOAT *bas_j = phgQuadGetBasisValues(e, ns->du, j_e, quad);
                             
                             const FLOAT *bas_dot_n = get_bas_dot_normal(bas, normal, i_e, j_e);
+
+                            FLOAT f_factor = get_f_factor(lambda_x);
+
                             for (k = 0; k < Dim; k++)
                             {
                                     //F[j_e][k][i_e][k] += area*w[q]*RHO_WAT*GRAVITY*bas[i_e]*bas[j_e]*normal[k]*normal[k]*Ns*dt1*EQU_SCALING;
@@ -994,7 +1181,7 @@ phgNSBuildSolverUMat(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 #if 1
                                 for (l = 0; l < Dim; l++)
                                 {
-                                    F[j_e][l][i_e][k] += area*w[q]*RHO_WAT*GRAVITY*
+                                    F[j_e][l][i_e][k] += area*w[q]*RHO_WAT*GRAVITY*f_factor*
                                         bas_dot_n[k+l*Dim]*Ns*dt1*EQU_SCALING;
                                 }
 #endif
