@@ -18,10 +18,12 @@ NSParams *ns_params = NULL;
 //void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a);
 char vtk_file[1000];
 
+/*
 void func_T(FLOAT x, FLOAT y, FLOAT z, FLOAT *T) {
     //double sur = -0.018*(x-1e5)+200;
     *T = -5+TEMP_WATER;			
 }
+*/
 
 void func_u0(FLOAT x, FLOAT y, FLOAT z, FLOAT *u)
 {
@@ -137,6 +139,8 @@ main(int argc, char *argv[])
 
     ns = phgNSCreate(g, ns_params);
 
+    printf("test2\n");
+
     //get_mask_bot(ns);
     
     ns->time[1] = Time;
@@ -165,6 +169,7 @@ main(int argc, char *argv[])
     phgFinalize();
     exit(1);
 #endif
+
 
 
 
@@ -1040,8 +1045,8 @@ main(int argc, char *argv[])
         get_surf_dH(ns);
         //DOF *dH_fem = phgDofCopy(ns->dH, NULL, NULL, NULL);
         phgExportVTK(g, "dH_fem1.vtk", ns->dH, NULL);
-        get_smooth_surface_values(ns, ns->dH, 0);
-        get_smooth_surface_values(ns, ns->dH, 1);
+        //get_smooth_surface_values(ns, ns->dH, 0);
+        //get_smooth_surface_values(ns, ns->dH, 1);
         phgExportVTK(g, "dH_fem.vtk", ns->dH, NULL);
 
         /*

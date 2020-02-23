@@ -8,8 +8,8 @@
 
 #define ERR(e) {printf("Error: %s\n", nc_strerror(e)); abort();}
 
-#define NX 301
-#define NY 561
+#define NX 1200
+#define NY 1200
 #define NZ 11
 
 typedef struct NC_DATA_ {
@@ -31,7 +31,7 @@ typedef struct NC_DATA_ {
     float smb[NY][NX];
     float airtemp2m[NY][NX];
     float surftemp[NY][NX];
-    float temp[NZ][NY][NX];
+    float temp[NY][NX];
     float *list[100];
 } NC_DATA;
 
@@ -99,7 +99,7 @@ read_nc_data(char *file_name)
     /* READ_DATA_2D(bheatflx); */
     /* READ_DATA_2D(presprcp); */
     /* READ_DATA_2D(lon); */
-    /* READ_DATA_2D(usrf); */
+     READ_DATA_2D(usrf); 
     /* READ_DATA_2D(surfvely); */
     /* READ_DATA_2D(surfvelx); */
     READ_DATA_2D(topg);
@@ -108,7 +108,7 @@ read_nc_data(char *file_name)
     /* READ_DATA_2D(smb); */
     /* READ_DATA_2D(airtemp2m); */
     /* READ_DATA_2D(surftemp); */
-    READ_DATA_3D(temp);
+    READ_DATA_2D(temp);
 
     if ((retval = nc_close(ncid)))
 	ERR(retval);
@@ -139,6 +139,7 @@ interp_nc_data_3D(double x, double y, double z, int level, double *a)
 {
     int i, j;
     double a00, a01, a10, a11;
+    double d00, d01, d10, d11;
     double wx, wy;
 
     x *= nc_length_scale;
@@ -148,8 +149,8 @@ interp_nc_data_3D(double x, double y, double z, int level, double *a)
 #if 0
 #else
     /* relative position */
-    i = (int) x / dx ;
-    j = (int) y / dy;
+    i = (int) (x-x1[0]) / dx ;
+    j = (int) (y-y1[0]) / dy;
 
     /* only interior region, no interp near margin */
     assert(i < NX-1);
@@ -176,12 +177,21 @@ interp_nc_data_3D(double x, double y, double z, int level, double *a)
     a11 = (x+dx) + 2*(y+dy);
 #endif
 
+    /*
     wx = (x - (x1[i] - x1[0])) / dx;
     wy = (y - (y1[j] - y1[0])) / dy;
     a[0] = a00 * (1-wx) * (1-wy) 
 	+ a01 * (1-wx) * wy
 	+ a10 * wx * (1-wy)
 	+ a11 * wx * wy;
+    */
+
+    d00 = sqrt((x-x1[i])*(x-x1[i])+(y-y1[j])*(y-y1[j]));
+    d01 = sqrt((x-x1[i])*(x-x1[i])+(y-y1[j+1])*(y-y1[j+1]));
+    d10 = sqrt((x-x1[i+1])*(x-x1[i+1])+(y-y1[j])*(y-y1[j]));
+    d11 = sqrt((x-x1[i+1])*(x-x1[i+1])+(y-y1[j+1])*(y-y1[j+1]));
+
+    a[0] = (a00/d00+a01/d01+a10/d10+a11/d11)/(1/d00+1/d01+1/d10+1/d11);
 
     a[0] *= nc_data_scaling;
     return;

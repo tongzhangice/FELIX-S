@@ -72,6 +72,7 @@ ice_grid(GRID *g)
                 else
                     e->bound_type[s] = (BC_BOTTOM_GRD | BC_BOTTOM);
 
+                /*
                 INT TEST_ICE_SHELF_BUTS_2D = 0;
                 if (TEST_ICE_SHELF_BUTS_2D == 1)
                 {
@@ -83,6 +84,7 @@ ice_grid(GRID *g)
 
                     }
                 }
+                */
 
             }
 

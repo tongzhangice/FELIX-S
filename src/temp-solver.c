@@ -821,7 +821,7 @@ init_temp_interp(NSSolver *ns)
     /* interp */
     phgDofCopy(T_P1, &T[1], NULL, "T_{n+1}");
     //phgDofGradient(T[1], &ns->gradT[1], NULL, "gradT_{n+1}");
-    //phgExportTecplot(g, "init_T_interp.plt", T[1], NULL);
+    phgExportVTK(g, "init_T_interp.vtk", T[1], NULL);
     
     phgDofFree(&T_P1);
     DOF_SCALE(ns->T[1], "interp");
@@ -880,13 +880,13 @@ init_temp_data(NSSolver *ns)
 	DOF_SCALE(ns->beta, "interp");
 	//fclose(fp);
 
-	phgExportTecplot(g, "beta_interp.plt", Beta, NULL);
+	phgExportVTK(g, "beta_interp.vtk", Beta, NULL);
 	phgFree(data);
     }
     
 
     /* Temp */
-    if (0) {
+    if (1) {
 	phgPrintf("\n   ==================\n");
 	phgPrintf("   Temperature init interp, from 2D data\n");
 	phgPrintf("   ==================\n\n");
@@ -938,7 +938,7 @@ init_temp_data(NSSolver *ns)
 	/* interp */
 	phgDofCopy(T_P1, &T[1], NULL, "T_{n+1}");
 	//phgDofGradient(T[1], &ns->gradT[1], NULL, "gradT_{n+1}");
-	phgExportTecplot(g, "init_T_interp.plt", T[1], NULL);
+	phgExportVTK(g, "init_T_interp.vtk", T[1], NULL);
     
 	phgDofFree(&T_P1);
 	DOF_SCALE(ns->T[1], "interp");

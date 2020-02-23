@@ -9,7 +9,7 @@
 
 #if ICE_BENCH_TEST
 #elif ESIMINT_TEST || HEINO_TEST 
-#elif TEST_CASE == ICE_GREEN_LAND
+#elif TEST_CASE == LAS
 enum {
     data_index_dhdt		= 1,
     data_index_surfvelmag	= 2,
@@ -22,12 +22,12 @@ enum {
     data_index_surfvely		= 9,
     data_index_surfvelx		= 10,
     data_index_topg		= 11,
-    data_index_thk		= 12,
+    data_index_thk		= 17,
     data_index_runoff		= 13,
     data_index_smb		= 14,
     data_index_airtemp2m	= 15,
     data_index_surftemp		= 16,
-    data_index_temp		= 17,
+    data_index_temp		= 12,
     data_index_x1		= 18,
     data_index_y1       	= 19,
 };

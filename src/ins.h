@@ -46,7 +46,7 @@
 
 /* Sliding B.C. */
 #define USE_NODAL_LOADS 1
-#define USE_SLIDING_BC 1
+#define USE_SLIDING_BC 0
 #define CASE_DRAINAGE_BASIN 0
 #define ZERO_TRACT_ZONE 0
 #define SLIP_BDRY BC_BOTTOM

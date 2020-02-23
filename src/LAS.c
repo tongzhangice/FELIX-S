@@ -15,18 +15,21 @@ void
 iceInit(GRID *g, LAYERED_MESH **gL_ptr)
 {
 //    SIMPLEX *e;
-    int i, j;
+    int i;
     LAYERED_MESH *gL;
     
     // read data
-    data_bed = read_txt_data(ns_params->bed_txt_file);
-    data_sur = read_txt_data(ns_params->sur_txt_file);
-    data_thk = read_txt_data(ns_params->thk_txt_file);
-    data_sur_grad_x = read_txt_data(ns_params->sur_grad_x_txt_file);
-    data_sur_grad_y = read_txt_data(ns_params->sur_grad_y_txt_file);
+    //data_bed = read_txt_data(ns_params->bed_txt_file);
+    //data_sur = read_txt_data(ns_params->sur_txt_file);
+    //data_thk = read_txt_data(ns_params->thk_txt_file);
+    //data_sur_grad_x = read_txt_data(ns_params->sur_grad_x_txt_file);
+    //data_sur_grad_y = read_txt_data(ns_params->sur_grad_y_txt_file);
+
+    read_nc_data(ns_params->nc_file);
 
 
     ice_grid(g);
+    printf("ice grid done!\n");
     phgExportVTK(g, "ice_domain.vtk", NULL);
     
     //free(data_bed[0]);
@@ -96,12 +99,16 @@ void
 func_ice_slab(FLOAT x, FLOAT y, FLOAT z, FLOAT *coord)
 {
 
-	double bed, sur, thk;
+	double bed, sur, thk, sur_shelf, thk_shelf;
     x *= 1000;
     y *= 1000;    
-	interp_txt_data(data_bed, x, y, z, &bed);
-	interp_txt_data(data_sur, x, y, z, &sur);
-	interp_txt_data(data_thk, x, y, z, &thk);
+	//interp_txt_data(data_bed, x, y, z, &bed);
+	//interp_txt_data(data_sur, x, y, z, &sur);
+	//interp_txt_data(data_thk, x, y, z, &thk);
+
+    nc_data_set_active(data_index_thk);
+    //nc_data_scaling = 1. / LEN_SCALING;
+    interp_nc_data(x, y, z, &thk);
 
 	if (thk < 1e-10 && thk >= 0) {
 	  //printf("thk zero, change to 1m\n.");
@@ -109,10 +116,40 @@ func_ice_slab(FLOAT x, FLOAT y, FLOAT z, FLOAT *coord)
 	  thk = 1;
 	}
 
+    nc_data_set_active(data_index_usrf);
+    //nc_data_scaling = 1. / LEN_SCALING;;
+    interp_nc_data(x, y, z, &sur);
+
+    nc_data_set_active(data_index_topg);
+    //nc_data_scaling = 1. / LEN_SCALING;;
+    interp_nc_data(x, y, z, &bed);
+
 	coord[0] = x;
 	coord[1] = y; 
 	coord[2] = sur - (1-z)*thk;
+
+    /*
+    if ((sur-thk-bed)>1 && sur>0){
+        //thk_shelf = sur * RHO_WAT / (RHO_WAT-RHO_ICE);
+        sur_shelf = thk * (RHO_WAT-RHO_ICE)/RHO_WAT;
+        printf("thk_shelf %f\n", thk_shelf);
+        coord[2] = sur_shelf - (1-z)*thk;
+    }
+    */
     
+}
+
+void func_T(FLOAT x, FLOAT y, FLOAT z, FLOAT *T) {
+    /* Temp */
+    x *= 1;
+    y *= 1;
+
+    nc_data_set_active(data_index_temp);
+    //nc_data_scaling = 1.;
+    //interp_nc_data_3D(x, y, z, 0, T);
+    interp_nc_data(x, y, z, T);
+
+    *T += TEMP_WATER;			
 }
 
 
@@ -124,10 +161,22 @@ func_ice_shelf_mask(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_shelf_mask)
     //double **data_bed, **data_sur, **data_thk;
     x *= 1000;
     y *= 1000;    
-	interp_txt_data(data_bed, x, y, z, &bed);
-	interp_txt_data(data_sur, x, y, z, &sur);
-	interp_txt_data(data_thk, x, y, z, &thk); 
+	//interp_txt_data(data_bed, x, y, z, &bed);
+	//interp_txt_data(data_sur, x, y, z, &sur);
+	//interp_txt_data(data_thk, x, y, z, &thk); 
     
+    nc_data_set_active(data_index_thk);
+    //nc_data_scaling = 1. / LEN_SCALING;
+    interp_nc_data(x, y, z, &thk);
+
+    nc_data_set_active(data_index_usrf);
+    //nc_data_scaling = 1. / LEN_SCALING;;
+    interp_nc_data(x, y, z, &sur);
+
+    nc_data_set_active(data_index_topg);
+    //nc_data_scaling = 1. / LEN_SCALING;;
+    interp_nc_data(x, y, z, &bed);
+
     if ((sur-thk-bed)>1){
         ice_shelf_mask[0] = 1;
     }
@@ -237,7 +286,7 @@ FLOAT
 get_effective_viscosity(const FLOAT *gu, FLOAT T, FLOAT p,
 			int viscosity_type)
 {
-    FLOAT A = 1e-16;
+    FLOAT A;
     const FLOAT n = POWER_N;
     const FLOAT a = SEC_PER_YEAR;
     //const FLOAT L = _Length_;
@@ -263,9 +312,12 @@ get_effective_viscosity(const FLOAT *gu, FLOAT T, FLOAT p,
     const FLOAT a1 = ARRHENIUS_A1;
     const FLOAT R  = GAS_CONSTANT;
 
+    if (T>=300 || T <150)
+        printf("T: %f\n", T);
+
     assert(T <= 300 && T > 150); /* reasonable temp region */
 
-#if 0 
+#if 1 
 #  warning vis - theraml coupled
     if (T < T0)
         A = a0 * exp(-Q0 / R / T);
@@ -482,6 +534,7 @@ void func_smb_slf(FLOAT x, FLOAT y, FLOAT z, FLOAT *value)
 }
 
 
+#if 0
 void load_dH_from_file(NSSolver *ns, DOF *dof_P1, int up_or_lower)
 {
     GRID *g = ns->g;
@@ -1078,3 +1131,4 @@ void get_smooth_surface_values(NSSolver *ns, DOF *dof_P1, int up_or_lower)
      } 
 
 }
+#endif

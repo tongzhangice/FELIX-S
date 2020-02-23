@@ -1953,7 +1953,7 @@ INT if_update_shelf_mask(NSSolver *ns)
         get_water_force(ns);
         get_contact_force(ns);
         ns->stress_nn = ns->contact_force;
-        get_smooth_surface_values(ns, ns->stress_nn, 0);
+        //get_smooth_surface_values(ns, ns->stress_nn, 0);
     }
 
     if (contact_method == 2)
