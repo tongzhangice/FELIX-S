@@ -45,6 +45,8 @@ phgParametersCreate()
     phgOptionsRegisterFilename("y_txt_file", "Mesh file", (char **)&_p->y_txt_file);
     phgOptionsRegisterFilename("sur_grad_x_txt_file", "Mesh file", (char **)&_p->sur_grad_x_txt_file);
     phgOptionsRegisterFilename("sur_grad_y_txt_file", "Mesh file", (char **)&_p->sur_grad_y_txt_file);
+    phgOptionsRegisterInt("row_txt", "row number of the txt file", &_p->row_txt);
+    phgOptionsRegisterInt("col_txt", "column number of the txt file", &_p->col_txt);
 
     phgOptionsRegisterNoArg("layered_mesh", "Layered mesh", &_p->layered_mesh);
     //phgOptionsRegisterFloat("slop_alpha", "Slop alpha", &_alpha_);

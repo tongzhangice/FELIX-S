@@ -2,11 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ins.h"
-static int NX=11, NY=51, NODATA_VALUE=-9999, /*dx=2500,*/ dy=2500;
+static int NODATA_VALUE=-9999, /*dx=2500,*/ dy=2500;
 static double xllcorner=0*1000, yllcorner=0*1000;
 static int len = 8001;
 static double x_end = 800e3, dx = 100.0;
-double** read_txt_data(char *file_name)
+double** read_txt_data(char *file_name, int row, int col)
 {
     FILE *fp;
 	int i, j, k=0;
@@ -16,11 +16,11 @@ double** read_txt_data(char *file_name)
         printf("errors when opening 2D geo file!\n");
     }
 
-	data = (double**) calloc(NY, sizeof *data);
-	for (j=0;j<NY;j++)
+	data = (double**) calloc(row, sizeof *data);
+	for (j=0;j<row;j++)
 	{
-		data[j] = (double*) calloc(NX, sizeof *data[j]);
-		for (i=0;i<NX;i++)
+		data[j] = (double*) calloc(col, sizeof *data[j]);
+		for (i=0;i<col;i++)
 		{
             k++;
 			fscanf(fp, "%lf", &data[j][i]);

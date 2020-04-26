@@ -938,7 +938,7 @@ void struct_mesh_update(NSSolver *ns, int tstep, double t);
 #define INS_H
 #endif
 
-double** read_txt_data(char *file_name);
+double** read_txt_data(char *file_name, int row, int col);
 
 void get_mask_bot(NSSolver *ns);
 void get_sur_normals_z(GRID *g, DOF *sur_normal_z);

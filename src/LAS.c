@@ -12,11 +12,11 @@ iceInit(GRID *g, LAYERED_MESH **gL_ptr)
     GEO_INFO *geo = (GEO_INFO *) phgCalloc(1, sizeof(*geo));    
     
     // read data
-    data_bed = read_txt_data(ns_params->bed_txt_file);
-    data_sur = read_txt_data(ns_params->sur_txt_file);
-    data_thk = read_txt_data(ns_params->thk_txt_file);
-    data_sur_grad_x = read_txt_data(ns_params->sur_grad_x_txt_file);
-    data_sur_grad_y = read_txt_data(ns_params->sur_grad_y_txt_file);
+    data_bed = read_txt_data(ns_params->bed_txt_file, ns_params->row_txt, ns_params->col_txt);
+    data_sur = read_txt_data(ns_params->sur_txt_file, ns_params->row_txt, ns_params->col_txt);
+    data_thk = read_txt_data(ns_params->thk_txt_file, ns_params->row_txt, ns_params->col_txt);
+    data_sur_grad_x = read_txt_data(ns_params->sur_grad_x_txt_file, ns_params->row_txt, ns_params->col_txt);
+    data_sur_grad_y = read_txt_data(ns_params->sur_grad_y_txt_file, ns_params->row_txt, ns_params->col_txt);
 
 
     geo = ice_grid(g);
