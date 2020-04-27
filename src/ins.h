@@ -345,6 +345,8 @@ typedef struct NSParams_ {
     char *y_txt_file;
     char *sur_grad_x_txt_file;
     char *sur_grad_y_txt_file;
+    int row_txt;
+    int col_txt;
 
     /* Netcdf file */
     char *nc_file;
@@ -855,7 +857,7 @@ void struct_mesh_update(NSSolver *ns, int tstep, double t);
     elapsed_time(__VA_ARGS__);
     
 
-#if 0
+#if 1
 #define DOF_SCALE(u, desp) {}
 #elif 0
 # define DOF_SCALE(u, desp)					\
@@ -867,7 +869,7 @@ void struct_mesh_update(NSSolver *ns, int tstep, double t);
 	      phgDofMinValVec(u),				\
 	      phgDofMaxValVec(u)				\
 	      );						
-#elif 1
+#elif 0
 # define DOF_SCALE(u, description) {				\
 	char trimed[100];					\
 	strncpy(trimed, __FUNCTION__, 8);			\

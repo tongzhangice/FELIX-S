@@ -25,8 +25,8 @@ iceInit(GRID *g, LAYERED_MESH **gL_ptr)
     //data_thk = read_txt_data(ns_params->thk_txt_file);
     //data_bot = read_txt_data(ns_params->bed_txt_file);
 
-    data_x = read_txt_data(ns_params->x_txt_file);
-    data_y = read_txt_data(ns_params->y_txt_file);
+    data_x = read_txt_data(ns_params->x_txt_file, ns_params->row_txt, ns_params->col_txt);
+    data_y = read_txt_data(ns_params->y_txt_file, ns_params->row_txt, ns_params->col_txt);
 
 
     ice_grid(g);
@@ -111,7 +111,7 @@ func_ice_slab(FLOAT x, FLOAT y, FLOAT z, FLOAT *coord)
     else
         bot = sur - thk;
 
-	if (thk < 1e-10 && thk >= 0) {
+    if (thk < 1e-10 && thk >= 0){
 	  printf("thk zero, change to 1m\n.");
       printf("sur: %lf, bed: %lf\n", sur, bed);
 	  thk = 1;
@@ -588,7 +588,7 @@ void load_dH_from_file(NSSolver *ns, DOF *dof_P1, int up_or_lower)
 
     int i, ii, j, k;
 
-    static FLOAT *nsv, *nsv0, *x_coord, *x_coord0, *y_coord, *y_coord0;
+    static FLOAT *nsv, *nsv0;
 
     PHG_CALLOC(nsv, gL->nvert);
     PHG_CALLOC(nsv0, gL->nvert);
@@ -700,7 +700,7 @@ void save_free_surface_velo(NSSolver *ns, int which_dim, int up_or_lower)
 
     int i, ii, j, k;
 
-    static FLOAT *nsv, *nsv0, *x_coord, *x_coord0, *y_coord, *y_coord0;
+    static FLOAT *nsv, *nsv0;
 
     PHG_CALLOC(nsv, gL->nvert);
     PHG_CALLOC(nsv0, gL->nvert);
@@ -842,7 +842,7 @@ void save_free_surface_elev(NSSolver *ns, int up_or_lower)
 
     int i, ii, j, k;
 
-    static FLOAT *nsv, *nsv0, *x_coord, *x_coord0, *y_coord, *y_coord0;
+    static FLOAT *nsv, *nsv0;
 
     PHG_CALLOC(nsv, gL->nvert);
     PHG_CALLOC(nsv0, gL->nvert);
@@ -961,7 +961,7 @@ void get_smooth_surface_values(NSSolver *ns, DOF *dof_P1, int up_or_lower)
 
     int i, ii, j, k;
 
-    static FLOAT *nsv, *nsv0, *x_coord, *x_coord0, *y_coord, *y_coord0;
+    static FLOAT *nsv, *nsv0;
 
     PHG_CALLOC(nsv, gL->nvert);
     PHG_CALLOC(nsv0, gL->nvert);

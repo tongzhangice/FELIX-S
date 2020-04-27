@@ -31,36 +31,34 @@ double** read_txt_data(char *file_name, int row, int col)
 	return data;
 }
 
-void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a)
+void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, int row, int col)
 {
 	int i, j, ip1, jp1, i1;
 	double a00, a01, a10, a11;
 	//double wx, wy, val;
-    //int NX=1518, NY=1324;
-    //double xllcorner=792.5, yllcorner=-125.5;
     int interp_points=4;
-    double x1[NX];
-    double y1[NY];
+    double x1[col];
+    double y1[row];
     double eps=1e-3;
 
     if (y<0)
         y = -y;
     
-    for (i1=0;i1<NX;i1++)
+    for (i1=0;i1<col;i1++)
 		x1[i1] = i1*dx + xllcorner;
-	for (i1=0;i1<NY;i1++)
+	for (i1=0;i1<row;i1++)
 		y1[i1] = i1*dy + yllcorner;
 	
 	i = (int) (x - xllcorner)/dx;
 	j = (int) (y - yllcorner)/dy;
 
-    if (i<NX-1&&j<NY-1)
+    if (i<col-1&&j<row-1)
     {
 		
-        a00 = data[NY-j-2][i];
-	    a01 = data[NY-j-1][i];	    
-	    a10 = data[NY-j-2][i+1];	    
-	    a11 = data[NY-j-1][i+1];
+        a00 = data[row-j-2][i];
+	    a01 = data[row-j-1][i];	    
+	    a10 = data[row-j-2][i+1];	    
+	    a11 = data[row-j-1][i+1];
 		
 		//printf("A00 A01 A10 A11: %lf %lf %lf %lf %d %lf %lf %d %d\n", a00, a01, a10, a11, interp_points, x, y, i, j);
         if (abs(a00-NODATA_VALUE)<eps){		
@@ -90,22 +88,22 @@ void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a)
             }
         
         else if (interp_points==0){
-            if (abs(data[NY-j-2][i]-NODATA_VALUE)>eps)
-                a[0] = data[NY-j-2][i];
-            else if (abs(data[NY-j][i]-NODATA_VALUE)>eps)
-                a[0] = data[NY-j][i];
-            else if (abs(data[NY-j-1][i-1]-NODATA_VALUE)>eps)
-                a[0] = data[NY-j-1][i-1];
-            else if (abs(data[NY-j-1][i+1]-NODATA_VALUE)>eps)
-                a[0] = data[NY-j-1][i+1];
-            else if (abs(data[NY-j-2][i-1]-NODATA_VALUE)>eps)
-                a[0] = data[NY-j-2][i-1];
-            else if (abs(data[NY-j-2][i+1]-NODATA_VALUE)>eps)
-                a[0] = data[NY-j-2][i+1];
-            else if (abs(data[NY-j][i-1]-NODATA_VALUE)>eps)
-                a[0] = data[NY-j][i-1];
-            else if (abs(data[NY-j][i+1]-NODATA_VALUE)>eps)
-                a[0] = data[NY-j][i+1];
+            if (abs(data[row-j-2][i]-NODATA_VALUE)>eps)
+                a[0] = data[row-j-2][i];
+            else if (abs(data[row-j][i]-NODATA_VALUE)>eps)
+                a[0] = data[row-j][i];
+            else if (abs(data[row-j-1][i-1]-NODATA_VALUE)>eps)
+                a[0] = data[row-j-1][i-1];
+            else if (abs(data[row-j-1][i+1]-NODATA_VALUE)>eps)
+                a[0] = data[row-j-1][i+1];
+            else if (abs(data[row-j-2][i-1]-NODATA_VALUE)>eps)
+                a[0] = data[row-j-2][i-1];
+            else if (abs(data[row-j-2][i+1]-NODATA_VALUE)>eps)
+                a[0] = data[row-j-2][i+1];
+            else if (abs(data[row-j][i-1]-NODATA_VALUE)>eps)
+                a[0] = data[row-j][i-1];
+            else if (abs(data[row-j][i+1]-NODATA_VALUE)>eps)
+                a[0] = data[row-j][i+1];
         }
         
         else{
@@ -115,12 +113,12 @@ void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a)
     }
     else
     {
-        if (j==NY){
-            a[0] = data[NY-j][i];}
-        else if (i==NX){
-            a[0] = data[NY-j-1][i-1];}
+        if (j==row){
+            a[0] = data[row-j][i];}
+        else if (i==col){
+            a[0] = data[row-j-1][i-1];}
         else 
-            a[0] = data[NY-j-1][i];
+            a[0] = data[row-j-1][i];
     }
 	
 }	
