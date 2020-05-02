@@ -2,10 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ins.h"
-static int NODATA_VALUE=-9999, /*dx=2500,*/ dy=2500;
-static double xllcorner=0*1000, yllcorner=0*1000;
-static int len = 8001;
-static double x_end = 800e3, dx = 100.0;
+
 double** read_txt_data(char *file_name, int row, int col)
 {
     FILE *fp;
@@ -31,7 +28,9 @@ double** read_txt_data(char *file_name, int row, int col)
 	return data;
 }
 
-void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, int row, int col)
+void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, 
+        int row, int col, FLOAT xllcorner, FLOAT yllcorner,
+        FLOAT NODATA_VALUE, FLOAT dx, FLOAT dy)
 {
 	int i, j, ip1, jp1, i1;
 	double a00, a01, a10, a11;
@@ -46,21 +45,20 @@ void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, int row
     
     for (i1=0;i1<col;i1++)
 		x1[i1] = i1*dx + xllcorner;
+
 	for (i1=0;i1<row;i1++)
 		y1[i1] = i1*dy + yllcorner;
 	
 	i = (int) (x - xllcorner)/dx;
 	j = (int) (y - yllcorner)/dy;
 
-    if (i<col-1&&j<row-1)
-    {
+    if (i<col-1 && j<row-1){
 		
         a00 = data[row-j-2][i];
 	    a01 = data[row-j-1][i];	    
 	    a10 = data[row-j-2][i+1];	    
 	    a11 = data[row-j-1][i+1];
 		
-		//printf("A00 A01 A10 A11: %lf %lf %lf %lf %d %lf %lf %d %d\n", a00, a01, a10, a11, interp_points, x, y, i, j);
         if (abs(a00-NODATA_VALUE)<eps){		
             a00 = 0;
             interp_points--;
@@ -83,11 +81,11 @@ void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, int row
 		//	printf("something terrible happened!\n");
 		//}	
 
-        if (interp_points>0&&interp_points<4){
+        if (interp_points > 0 && interp_points < 4){
             a[0] = (a00+a01+a10+a11)/interp_points;
             }
         
-        else if (interp_points==0){
+        else if (interp_points == 0){
             if (abs(data[row-j-2][i]-NODATA_VALUE)>eps)
                 a[0] = data[row-j-2][i];
             else if (abs(data[row-j][i]-NODATA_VALUE)>eps)
@@ -111,19 +109,20 @@ void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, int row
                     a10*(x-x1[i])*(y1[j]-y)+a01*(x1[i+1]-x)*(y-y1[j+1])+a11*(x-x1[i])*(y-y1[j+1]));
             }
     }
-    else
-    {
+    else{
         if (j==row){
-            a[0] = data[row-j][i];}
+            a[0] = data[row-j][i];
+        }
         else if (i==col){
-            a[0] = data[row-j-1][i-1];}
+            a[0] = data[row-j-1][i-1];
+        }
         else 
             a[0] = data[row-j-1][i];
     }
 	
 }	
 
-double* read_txt_data_1D(char *file_name)
+double* read_txt_data_1D(char *file_name, int len)
 {
     FILE *fp;
     double *data;
@@ -146,14 +145,15 @@ double* read_txt_data_1D(char *file_name)
 }
 
 
-void interp_txt_data_1D(double *data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a)
+void interp_txt_data_1D(double *data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, 
+        FLOAT x_start, FLOAT x_end, FLOAT dx)
 {
     int i;
 
     if (x==0){
         a[0] = data[0];
     }
-    if (x>0 && x<x_end){
+    if (x>x_start && x<x_end){
         i = x/dx+1;
         a[0] = data[i] + (data[i+1]-data[i])*(x-dx*i)/dx;
     }
