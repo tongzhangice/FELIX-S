@@ -752,3 +752,64 @@ INT check_u_convergence(NSSolver *ns, DOF *u, DOF *p, DOF *u_last, DOF *p_last, 
 
     return u_convergence;
 }
+
+void get_viscosity_field(GRID *g, DOF *strain_rate_e, DOF *viscosity)
+{
+    FLOAT temperature = 271.15;
+    
+    INT i;
+    FLOAT A;
+
+    FLOAT n = 3.0;
+
+    //A = A_0_h*exp(-Q_h/(R*temperature));
+    A = 1e-25*SEC_PER_YEAR;
+
+    for (i = 0; i < DofGetDataCount(strain_rate_e); i++)
+    {
+        //printf("%f\n", strain_rate_e->data[i]);
+        viscosity->data[i] = 0.5*pow(A, -1.0/n)*pow(strain_rate_e->data[i]+1e-30, -1.0+1.0/n);
+        if (viscosity->data[i] > 1.0e20)
+            viscosity->data[i] = 1.0e20;
+    }
+}
+
+
+void get_effective_strain_rate_field(GRID *g, DOF *strain_rate, DOF *strain_rate_e)
+{
+
+    INT i;
+
+    FLOAT *eps = strain_rate->data;
+
+    for (i = 0; i < DofGetDataCount(strain_rate)/(Dim*Dim); i++)
+    {
+        strain_rate_e->data[i] = sqrt(0.5*(SQUARE(eps[0+i*Dim*Dim])
+                                          +SQUARE(eps[4+i*Dim*Dim])
+                                          +SQUARE(eps[8+i*Dim*Dim])
+                                          +2*SQUARE(eps[1+i*Dim*Dim])
+                                          +2*SQUARE(eps[2+i*Dim*Dim])
+                                          +2*SQUARE(eps[5+i*Dim*Dim])
+                                          ));
+    }
+}
+
+
+void get_strain_rate_field(GRID *g, DOF *velocity_grad, DOF *strain_rate)
+{
+
+    INT i;
+
+    for (i = 0; i < DofGetDataCount(velocity_grad)/(Dim*Dim); i++)
+    {
+        strain_rate->data[0+i*Dim*Dim] = velocity_grad->data[0+i*Dim*Dim];
+        strain_rate->data[1+i*Dim*Dim] = 0.5*(velocity_grad->data[1+i*Dim*Dim]+velocity_grad->data[3+i*Dim*Dim]);
+        strain_rate->data[2+i*Dim*Dim] = 0.5*(velocity_grad->data[2+i*Dim*Dim]+velocity_grad->data[6+i*Dim*Dim]);
+        strain_rate->data[3+i*Dim*Dim] = strain_rate->data[1+i*Dim*Dim];
+        strain_rate->data[4+i*Dim*Dim] = velocity_grad->data[4+i*Dim*Dim];
+        strain_rate->data[5+i*Dim*Dim] = 0.5*(velocity_grad->data[5+i*Dim*Dim]+velocity_grad->data[7+i*Dim*Dim]);
+        strain_rate->data[6+i*Dim*Dim] = strain_rate->data[2+i*Dim*Dim];
+        strain_rate->data[7+i*Dim*Dim] = strain_rate->data[5+i*Dim*Dim];
+        strain_rate->data[8+i*Dim*Dim] = velocity_grad->data[8+i*Dim*Dim];
+    }
+}

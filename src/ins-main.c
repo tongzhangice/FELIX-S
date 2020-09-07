@@ -39,7 +39,7 @@ main(int argc, char *argv[])
     GRID *g;
     SIMPLEX *e;
     DOF **u, **p, **T, **gradu,
-	*eu, *ep, *egradu, *ediv, *eT,
+	*eu, *ep, *egradu, *ediv, *eT, *strain_rate, *strain_rate_e, *viscosity,
 	*dH = NULL;
     FLOAT Time, *dt, res, non_du, non_dp, non_dT;
     INT tstep = 0, nelem;
@@ -116,6 +116,9 @@ main(int argc, char *argv[])
     iceInit(g, &gL);
     phgExportVTK(g, "ice_domain.vtk", NULL);
 
+    strain_rate = phgDofNew(g, DOF_P2, Dim*Dim, "strain_rate", DofInterpolation);
+    strain_rate_e = phgDofNew(g, DOF_P2, 1, "strain_rate_e", DofInterpolation);
+    viscosity = phgDofNew(g, DOF_P2, 1, "viscosity", DofInterpolation);
 
     /* ================================================================================
      *
@@ -699,6 +702,13 @@ main(int argc, char *argv[])
 	phgDofFree(&u_last);
 	phgDofFree(&p_last);
 
+
+    DOF *velocity_grad = phgDofCopy(ns->gradu[1], NULL, DOF_P2, NULL);
+    get_strain_rate_field(g, velocity_grad, strain_rate);
+    get_effective_strain_rate_field(g, strain_rate, strain_rate_e);
+    get_viscosity_field(g, strain_rate_e, viscosity);
+    phgExportVTK(g, "./visc.vtk",viscosity,strain_rate_e,NULL);
+
 	//phgPrintf("Save Dofs\n");
 	//save_dof_data3(g, u[1], OUTPUT_DIR"u.dat");
 	//save_dof_data3(g, p[1], OUTPUT_DIR"p.dat");
@@ -976,8 +986,8 @@ main(int argc, char *argv[])
         get_surf_dH(ns);
         //DOF *dH_fem = phgDofCopy(ns->dH, NULL, NULL, NULL);
         //phgExportVTK(g, "dH_fem1.vtk", ns->dH, NULL);
-        get_smooth_surface_values(ns, ns->dH, 0);
-        get_smooth_surface_values(ns, ns->dH, 1);
+        //get_smooth_surface_values(ns, ns->dH, 0);
+        //get_smooth_surface_values(ns, ns->dH, 1);
         //phgExportVTK(g, "dH_fem.vtk", ns->dH, NULL);
 
         /*
@@ -997,8 +1007,8 @@ main(int argc, char *argv[])
             system("python get_lower_ds.py");
         }
 
-        load_dH_from_file(ns, ns->dH, 0);
-        load_dH_from_file(ns, ns->dH, 1);
+        load_dH_from_file(ns, ns->dH, 0, ns->row_txt, ns->col_txt);
+        load_dH_from_file(ns, ns->dH, 1, ns->row_txt, ns->col_txt);
         //DOF *dH_fdm = phgDofCopy(ns->dH, NULL, NULL, NULL);
 
         //phgDofAXPY(-1, dH_fem, &dH_fdm);

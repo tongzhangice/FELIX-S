@@ -347,6 +347,15 @@ typedef struct NSParams_ {
     char *sur_grad_y_txt_file;
     int row_txt;
     int col_txt;
+    FLOAT xllcorner_txt;
+    FLOAT yllcorner_txt;
+    FLOAT nodata_value_txt ;
+    FLOAT dx_txt;
+    FLOAT dy_txt;
+    int len_txt1D;
+    FLOAT x_start_txt1D;
+    FLOAT x_end_txt1D;
+    FLOAT dx_txt1D;
 
     /* Netcdf file */
     char *nc_file;
@@ -961,8 +970,12 @@ void get_water_force(NSSolver *ns);
 void get_contact_force(NSSolver *ns);
 void get_contact_force_value(NSSolver *ns);
 void get_contact(NSSolver *ns);
-double* read_txt_data_1D(char *file_name);
-void interp_txt_data_1D(double *data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a);
+double* read_txt_data_1D(char *file_name, int len);
+void interp_txt_data_1D(double *data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, 
+        FLOAT x_start, FLOAT x_end, FLOAT dx, int len);
+void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, 
+        int row, int col, FLOAT xllcorner, FLOAT yllcorner,
+        FLOAT NODATA_VALUE, FLOAT dx, FLOAT dy);
 INT if_update_shelf_mask(NSSolver *ns);
 void get_stress(NSSolver *ns, DOF *gradu, DOF *pressure);
 void get_stress1(NSSolver *ns);
@@ -974,8 +987,11 @@ FLOAT get_ice_volume(GRID *g);
 void get_avg_gu(NSSolver *ns);
 DOF * compare_two_dofs(DOF *a, DOF *b);
 DOF * get_dof_component(GRID *g, DOF *a, DOF_TYPE *, INT dim_all, INT dim_asked);
-void get_smooth_surface_values(NSSolver *ns, DOF *dof_P1, int up_or_lower);
-void load_dH_from_file(NSSolver *ns, DOF *dof_P1, int up_or_lower);
-void save_free_surface_velo(NSSolver *ns, int which_dim, int up_or_lower);
-void save_free_surface_elev(NSSolver *ns, int up_or_lower);
+void get_smooth_surface_values(NSSolver *ns, DOF *dof_P1, int up_or_lower, int row, int col);
+void load_dH_from_file(NSSolver *ns, DOF *dof_P1, int up_or_lower, int row, int col);
+void save_free_surface_velo(NSSolver *ns, int which_dim, int up_or_lower, int row, int col);
+void save_free_surface_elev(NSSolver *ns, int up_or_lower, int row, int col);
 void modify_mask_bot(NSSolver *ns);
+void get_viscosity_field(GRID *g, DOF *strain_rate_e, DOF *viscosity);
+void get_effective_strain_rate_field(GRID *g, DOF *strain_rate, DOF *strain_rate_e);
+void get_strain_rate_field(GRID *g, DOF *velocity_grad, DOF *strain_rate);
