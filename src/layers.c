@@ -1223,10 +1223,14 @@ build_layered_mesh(GRID *g, LAYERED_MESH *gL)
 	PHG_CALLOC(fb->edge2to3, 6 * fb->ne);
 
 	for (k = 0; k < 3; k++) { /* edge */
+	    //mid_tri[k][0] = .5*(  x_tri[ e2v_tri[k][0] ][0]
+	    //		+ x_tri[ e2v_tri[k][1] ][0])*1000.0;
 	    mid_tri[k][0] = .5*(  x_tri[ e2v_tri[k][0] ][0]
-				+ x_tri[ e2v_tri[k][1] ][0])*1000.0;
+				+ x_tri[ e2v_tri[k][1] ][0]);
+	    //mid_tri[k][1] = .5*(  x_tri[ e2v_tri[k][0] ][1]
+		//		+ x_tri[ e2v_tri[k][1] ][1])*1000.0;
 	    mid_tri[k][1] = .5*(  x_tri[ e2v_tri[k][0] ][1]
-				+ x_tri[ e2v_tri[k][1] ][1])*1000.0;
+				+ x_tri[ e2v_tri[k][1] ][1]);
 	}
 
 	for (ii = 0; ii < fb->ne; ii++) { /* tets */

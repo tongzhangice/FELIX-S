@@ -103,7 +103,7 @@
 #  define	 GRAVITY		9.8	/* Acceleration due to gravity */
 #  define	 POWER_N		3	/* power in Glen's law */
 #  define	 TEMP_WATER		273.15	/* Triple point of water */
-#  define	 GEOTHE_FLUX		4.2E-2	/* Geothermal heat flux */
+#  define	 GEOTHE_FLUX		4E-2	/* Geothermal heat flux */
 #  define	 THEM_CONDUCT		2.1	/* Thermal conductivity of ice */
 #  define	 HEAT_CAPACITY		2009	/* Heat capacity of ice  */
 #  define	 BETA_MELT		8.66E-4	/* Dependence of melting on depth */

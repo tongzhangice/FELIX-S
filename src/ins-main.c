@@ -23,6 +23,7 @@ void func_T(FLOAT x, FLOAT y, FLOAT z, FLOAT *T) {
     *T = -5+TEMP_WATER;			
 }
 
+
 void func_u0(FLOAT x, FLOAT y, FLOAT z, FLOAT *u)
 {
     u[0] = 10;
@@ -288,6 +289,7 @@ main(int argc, char *argv[])
     if (ns_params->solve_temp && tstep == 1) {
         phgPrintf("Init temp field!\n");
 	phgNSTempInit(ns);
+    phgExportVTK(g, "T_initial.vtk", ns->T[1], NULL);
     }
 
 	
@@ -880,6 +882,7 @@ main(int argc, char *argv[])
 
 	    phgPrintf("   Build Mat: ");
 	    phgNSBuildSolverTMat(ns, FALSE);
+        phgMatDumpMATLAB(ns->matT, "T", "T_.m");
 	    elapsed_time(g, TRUE, phgPerfGetMflops(g, NULL, NULL));
 	    phgPrintf("   Build RHS: ");
 	    phgNSBuildSolverTRHS(ns, FALSE);
@@ -890,6 +893,8 @@ main(int argc, char *argv[])
 
 	    phgNSSolverTSolve(ns, FALSE);
 	    elapsed_time(g, TRUE, phgPerfGetMflops(g, NULL, NULL));
+
+        phgExportVTK(g, "T_solve.vtk", ns->T[1], NULL);
 
 	    phgNSDestroySolverT(ns);
 

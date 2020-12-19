@@ -58,9 +58,9 @@ ins-main.o: ${PHG_LIB}${LIB_SUFFIX} ins.h parameters.h  ins-main.c
 contact.o: ${PHG_LIB}${LIB_SUFFIX} ins.h parameters.h  contact.c
 ins-solver.o: ${PHG_LIB}${LIB_SUFFIX} ins.h parameters.h  ins-solver.c
 ins-system.o: ${PHG_LIB}${LIB_SUFFIX} ins.h parameters.h  ins-system.c
-temp-solver.o: ${PHG_LIB}${LIB_SUFFIX} ins.h parameters.h  temp-solver.c
 ins-utils.o: ${PHG_LIB}${LIB_SUFFIX} ins.h parameters.h  ins-utils.c
-ins-bc.o: ${PHG_LIB}${LIB_SUFFIX} ins.h parameters.h  ins-testcase.c ins-bc.c LAS.c
+ins-bc.o: ${PHG_LIB}${LIB_SUFFIX} ins.h parameters.h  ins-testcase.c ins-bc.c TEST.c
+temp-solver.o: ${PHG_LIB}${LIB_SUFFIX} ins.h parameters.h  temp-solver.c TEST.c
 ins-pcd.o: ${PHG_LIB}${LIB_SUFFIX} ins.h parameters.h  ins-pcd.c
 save-load.o: ${PHG_LIB}${LIB_SUFFIX} save-load.c
 slip-bdry.o: ${PHG_LIB}${LIB_SUFFIX} slip-bdry.c

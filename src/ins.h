@@ -175,7 +175,7 @@
 #  define EQU_SCALING 1e-5
 #  define LEN_SCALING 1
 #  define PRES_SCALING 1e5
-#  define EQU_T_SCALING 1e12
+#  define EQU_T_SCALING 1e-5
 #elif TEST_CASE == ICE_EXACT
 #  define EQU_SCALING 1e-8
 #  define LEN_SCALING 1e3
@@ -340,6 +340,7 @@ typedef struct NSParams_ {
     char *dual_file;
     char *bed_txt_file;
     char *sur_txt_file;
+    char *surT_txt_file;
     char *thk_txt_file;
     char *x_txt_file;
     char *y_txt_file;
@@ -417,6 +418,7 @@ typedef struct NSSolver_ {
     DOF *du;			  /* delta u in non-linear iteration */
     DOF *dp;			  /* delta p in non-linear iteration */
     DOF *dT;			  /* delta C in non-linear iteration */
+    DOF *T_old;
 #endif /* STEADY_STATE || TIME_DEP_NON */
     DOF **gradu;		  /* gradient velocity ptr */
     DOF **lapu;			  /* laplace velocity ptr */
@@ -606,6 +608,7 @@ void func_g1(FLOAT x, FLOAT y, FLOAT z, FLOAT *g);
 void func_g2(FLOAT x, FLOAT y, FLOAT z, FLOAT *g);
 void func_g3(FLOAT x, FLOAT y, FLOAT z, FLOAT *g);
 void func_T(FLOAT x, FLOAT y, FLOAT z, FLOAT *value);
+void func_T_sur(FLOAT x, FLOAT y, FLOAT z, FLOAT *temp);
 void func_fT(FLOAT x, FLOAT y, FLOAT z, FLOAT *value);
 void func_beta(FLOAT x, FLOAT y, FLOAT z, FLOAT *beta);
 void func_q(FLOAT x, FLOAT y, FLOAT z, FLOAT *value);
@@ -628,6 +631,7 @@ FUNC_T_DECLARE(func_gradu);
 FUNC_T_DECLARE(func_gradp);
 FUNC_T_DECLARE(func_f);
 FUNC_T_DECLARE(func_T);
+FUNC_T_DECLARE(func_T_sur);
 
 
 /* ins-sovler.c */
@@ -949,7 +953,7 @@ void struct_mesh_update(NSSolver *ns, int tstep, double t);
 #define INS_H
 #endif
 
-double** read_txt_data(char *file_name, int row, int col);
+double** read_txt_data(const char *file_name, int row, int col);
 
 void get_mask_bot(NSSolver *ns);
 void get_sur_normals_z(GRID *g, DOF *sur_normal_z);

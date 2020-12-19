@@ -1,4 +1,6 @@
-
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "ins.h"
 #include "mat_op3.h"
 #if USE_PETSC
@@ -168,6 +170,10 @@ phgNSBuildSolverTMat(NSSolver *ns, BOOLEAN init_T)
 			//FLOAT conv = INNER_PRODUCT(vu, ggj) * (*gi) / LEN_SCALING;
 			FLOAT diff_T = INNER_PRODUCT(ggi, ggj) / LEN_SCALING2;
 			FLOAT test_phi_i = *gi + SD_delta * (INNER_PRODUCT(vu, ggi));
+
+#if USE_TEMP_CONV
+            //phgPrintf("vu value %f", vu[0]);
+#endif
 
 			A[i][j] += vol*(*w) * (
 #if USE_TEMP_TIME
@@ -370,7 +376,7 @@ phgNSBuildSolverTRHS(NSSolver *ns, BOOLEAN init_T)
 	}	  /* end of faces */
 
 	for (i = 0; i < M; i++) 
-	    if (phgDofDirichletBC_(ns->T[1], e, i, func_T, buf, rhs + i,
+	    if (phgDofDirichletBC_(ns->T[1], e, i, func_T_sur, buf, rhs + i,
 				   DOF_PROJ_NONE)) 
 		;
 
@@ -450,12 +456,12 @@ phgNSSolverTBuildConstrain(NSSolver *ns)
     }
 
     /* Output check */
-    if (0) {
+    if (1) {
 	char name[1000];
-	sprintf(name, "cntrT.plt");
+	sprintf(name, "cntrT.vtk");
 	DOF *dof_cntr = phgDofCopy(ns->T[1], NULL, NULL, "T_cntr");
 	phgMapLocalDataToDof(T_map, 1, &dof_cntr, T_cntr);
-	phgExportTecplot(g, name, dof_cntr, NULL);
+	phgExportVTK(g, name, dof_cntr, NULL);
 	phgDofFree(&dof_cntr);
     }
 
@@ -488,13 +494,24 @@ phgNSSolverTSolve(NSSolver *ns, BOOLEAN init_T)
      * Step 1. Set Masker,
      *   since the height is updated, the masker need to be updated too.
      * ------------------------------------------------------------ */
-    if (init_T) 
+    if (init_T){ 
 	phgMapDofToLocalData(T_map, 1, &ns->T[1], vecT->data);
-    else
-	phgMapDofToLocalData(T_map, 1, &ns->T[0], vecT->data);
+    }
+    else{
+    phgExportVTK(g, "T1.vtk", ns->T[1], NULL);
+    phgExportVTK(g, "T0.vtk", ns->T[0], NULL);
+    phgExportVTK(g, "Told.vtk", ns->T_old, NULL);
+    phgExportVTK(g, "u_test.vtk", ns->u[1], NULL);
+	//phgMapDofToLocalData(T_map, 1, &ns->T[0], vecT->data);
+	phgMapDofToLocalData(T_map, 1, &ns->T_old, vecT->data);
+    }
+
     for (i = 0; i < nlocal; i++) {
-	if (vecT->data[i] >= T_cntr[i] - EPS_T)
+	if (vecT->data[i] >= T_cntr[i] - EPS_T){
 	    T_mask[i] = CONSTRAINED;
+        phgPrintf("vecT T_cntr EPS_T %f %f %f\n", vecT->data[i], T_cntr[i], EPS_T);
+        phgPrintf("constrained node found!!\n");
+    }
     }
     if (T_map->nprocs > 1)
 	remote_data = TRUE;
@@ -539,6 +556,7 @@ phgNSSolverTSolve(NSSolver *ns, BOOLEAN init_T)
 	phgVecCopy(vecT, &oldT);
 	phgMatPack(A_fix);
 
+    if (1)
 	{
 	    int n, jcol, *pc, *pc0, *pc_offp, nlocal;
 	    size_t *ps = A_fix->packed_ind;
@@ -608,6 +626,8 @@ phgNSSolverTSolve(NSSolver *ns, BOOLEAN init_T)
 	phgPrintf("      solver_T: nits = %d, resid = %0.4lg ",
 		  ns->solver_T->nits, ns->solver_T->residual);
 	phgMapLocalDataToDof(T_map, 1, &ns->T[1], vecT->data);
+    ns->T_old = phgDofCopy(ns->T[1], NULL, NULL, "T_old");
+    phgExportVTK(g, "T1.vtk", ns->T[1], NULL);
 	elapsed_time(g, TRUE, phgPerfGetMflops(g, NULL, NULL));
 
 	phgSolverDestroy(&ns->solver_T);
@@ -617,9 +637,15 @@ phgNSSolverTSolve(NSSolver *ns, BOOLEAN init_T)
 	/* Output check */
 	if (0) {
 	    char name[1000];
-	    sprintf(name, "nonT_%03d.plt", niter);
+	    sprintf(name, "nonT_%03d.vtk", niter);
 	    phgMapLocalDataToDof(T_map, 1, &ns->T[1], vecT->data);
-	    phgExportTecplot(g, name, ns->T[1], NULL);
+	    phgExportVTK(g, name, ns->T[1], NULL);
+	}
+	if (0) {
+	    char name[1000];
+	    sprintf(name, "nonTold_%03d.vtk", niter);
+	    phgMapLocalDataToDof(T_map, 1, &ns->T[1], oldT->data);
+	    phgExportVTK(g, name, ns->T[1], NULL);
 	}
 
 
@@ -716,6 +742,7 @@ init_temp_diff(NSSolver *ns)
 
     phgPrintf("   Build Mat: ");
     phgNSBuildSolverTMat(ns, TRUE);
+    phgMatDumpMATLAB(ns->matT, "Tini", "Tini_.m");
     elapsed_time(g, TRUE, phgPerfGetMflops(g, NULL, NULL));
     phgPrintf("   Build RHS: ");
     phgNSBuildSolverTRHS(ns, TRUE);
@@ -726,6 +753,8 @@ init_temp_diff(NSSolver *ns)
 
     /* Solve */
     phgNSSolverTSolve(ns, TRUE);
+    phgPrintf("export initial temperature\n\n");
+    phgExportVTK(g, "T_ini.vtk", ns->T[1], NULL);
 
     elapsed_time(g, TRUE, phgPerfGetMflops(g, NULL, NULL));
     phgNSDestroySolverT(ns);
@@ -795,7 +824,7 @@ init_temp_interp(NSSolver *ns)
     phgPrintf("   ==================\n\n");
     phgPrintf("   T type: %s\n", T[1]->type->name);
 
-    T_P1 = phgDofNew(g, DOF_P1, 1, "temp P1", func_T);
+    T_P1 = phgDofNew(g, DOF_P1, 1, "temp P1", func_T_sur);
     for (ii = 0; ii < gL->nvert_bot; ii++) {
 	i = gL->vert_bot_Lidx[ii];
 	assert(gL->vert_local_lists[i] != NULL);
@@ -820,6 +849,7 @@ init_temp_interp(NSSolver *ns)
 
     /* interp */
     phgDofCopy(T_P1, &T[1], NULL, "T_{n+1}");
+    ns->T_old = phgDofCopy(ns->T[1], NULL, NULL, "T_old");
     //phgDofGradient(T[1], &ns->gradT[1], NULL, "gradT_{n+1}");
     //phgExportTecplot(g, "init_T_interp.plt", T[1], NULL);
     
@@ -1302,12 +1332,19 @@ output_bottom_dofs(NSSolver *ns, int tstep)
 
 
 
+/*
+void func_T_sur(FLOAT x, FLOAT y, FLOAT z, FLOAT *temp)
+{
+	int i, j, I, J;
+	double sur_T, **data_sur_T;
+    x *= 1;
+    y *= 1;    
 
+	interp_txt_data(data_sur_T, x, y, z, &sur_T, ns_params->row_txt, ns_params->col_txt, 
+            ns_params->xllcorner_txt, ns_params->yllcorner_txt, ns_params->nodata_value_txt, ns_params->dx_txt, ns_params->dy_txt);
 
-
-
-
-
-
-
+	temp[0] = sur_T + 273.15;
+    //*temp = -10+TEMP_WATER;
+}
+*/
 

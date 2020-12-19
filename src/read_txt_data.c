@@ -3,14 +3,15 @@
 #include <string.h>
 #include "ins.h"
 
-double** read_txt_data(char *file_name, int row, int col)
+double** read_txt_data(const char *file_name, int row, int col)
 {
     FILE *fp;
 	int i, j, k=0;
 	double **data;
     fp = fopen(file_name, "r");
+
     if (fp==NULL){
-        printf("errors when opening 2D geo file!\n");
+        printf("\n errors when opening 2D geo file! Check the file path! \n");
     }
 
 	data = (double**) calloc(row, sizeof *data);
@@ -40,8 +41,8 @@ void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a,
     double y1[row];
     double eps=1e-3;
 
-    if (y<0)
-        y = -y;
+    //if (y<0)
+     //   y = -y;
     
     for (i1=0;i1<col;i1++)
 		x1[i1] = i1*dx + xllcorner;
@@ -81,27 +82,36 @@ void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a,
 		//	printf("something terrible happened!\n");
 		//}	
 
+
         if (interp_points > 0 && interp_points < 4){
             a[0] = (a00+a01+a10+a11)/interp_points;
             }
         
         else if (interp_points == 0){
-            if (abs(data[row-j-2][i]-NODATA_VALUE)>eps)
+            if (abs(data[row-j-2][i]-NODATA_VALUE)>eps){
                 a[0] = data[row-j-2][i];
-            else if (abs(data[row-j][i]-NODATA_VALUE)>eps)
+            }
+            else if (abs(data[row-j][i]-NODATA_VALUE)>eps){
                 a[0] = data[row-j][i];
-            else if (abs(data[row-j-1][i-1]-NODATA_VALUE)>eps)
+            }
+            else if (abs(data[row-j-1][i-1]-NODATA_VALUE)>eps){
                 a[0] = data[row-j-1][i-1];
-            else if (abs(data[row-j-1][i+1]-NODATA_VALUE)>eps)
+            }
+            else if (abs(data[row-j-1][i+1]-NODATA_VALUE)>eps){
                 a[0] = data[row-j-1][i+1];
-            else if (abs(data[row-j-2][i-1]-NODATA_VALUE)>eps)
+            }
+            else if (abs(data[row-j-2][i-1]-NODATA_VALUE)>eps){
                 a[0] = data[row-j-2][i-1];
-            else if (abs(data[row-j-2][i+1]-NODATA_VALUE)>eps)
+            }
+            else if (abs(data[row-j-2][i+1]-NODATA_VALUE)>eps){
                 a[0] = data[row-j-2][i+1];
-            else if (abs(data[row-j][i-1]-NODATA_VALUE)>eps)
+            }
+            else if (abs(data[row-j][i-1]-NODATA_VALUE)>eps){
                 a[0] = data[row-j][i-1];
-            else if (abs(data[row-j][i+1]-NODATA_VALUE)>eps)
+            }
+            else if (abs(data[row-j][i+1]-NODATA_VALUE)>eps){
                 a[0] = data[row-j][i+1];
+            }
         }
         
         else{
@@ -116,8 +126,9 @@ void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a,
         else if (i==col){
             a[0] = data[row-j-1][i-1];
         }
-        else 
+        else{ 
             a[0] = data[row-j-1][i];
+        }
     }
 	
 }	
@@ -136,7 +147,6 @@ double* read_txt_data_1D(char *file_name, int len)
     data = (double*) calloc(len, sizeof (*data));
     for (i=0; i<len; i++){
         fscanf(fp, "%lf", &data[i]);
-        //printf("data:%f\n", data[i]);
     }
 
     fclose(fp);
@@ -146,7 +156,7 @@ double* read_txt_data_1D(char *file_name, int len)
 
 
 void interp_txt_data_1D(double *data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, 
-        FLOAT x_start, FLOAT x_end, FLOAT dx)
+        FLOAT x_start, FLOAT x_end, FLOAT dx, int len)
 {
     int i;
 

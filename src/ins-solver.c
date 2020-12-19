@@ -40,6 +40,7 @@ phgParametersCreate()
     phgOptionsRegisterFilename("netcdf_file", "Mesh file", (char **)&_p->nc_file);
     phgOptionsRegisterFilename("bed_txt_file", "Mesh file", (char **)&_p->bed_txt_file);
     phgOptionsRegisterFilename("sur_txt_file", "Mesh file", (char **)&_p->sur_txt_file);
+    phgOptionsRegisterFilename("surT_txt_file", "Mesh file", (char **)&_p->surT_txt_file);
     phgOptionsRegisterFilename("thk_txt_file", "Mesh file", (char **)&_p->thk_txt_file);
     phgOptionsRegisterFilename("x_txt_file", "Mesh file", (char **)&_p->x_txt_file);
     phgOptionsRegisterFilename("y_txt_file", "Mesh file", (char **)&_p->y_txt_file);
@@ -47,6 +48,15 @@ phgParametersCreate()
     phgOptionsRegisterFilename("sur_grad_y_txt_file", "Mesh file", (char **)&_p->sur_grad_y_txt_file);
     phgOptionsRegisterInt("row_txt", "row number of the txt file", &_p->row_txt);
     phgOptionsRegisterInt("col_txt", "column number of the txt file", &_p->col_txt);
+    phgOptionsRegisterFloat("xllcorner_txt", "lower left X of the txt file", &_p->xllcorner_txt);
+    phgOptionsRegisterFloat("yllcorner_txt", "lower left Y of the txt file", &_p->yllcorner_txt);
+    phgOptionsRegisterFloat("nodata_value_txt", "nodata value of the txt file", &_p->nodata_value_txt);
+    phgOptionsRegisterFloat("dx_txt", "x stepping of the txt file", &_p->dx_txt);
+    phgOptionsRegisterFloat("dy_txt", "y stepping of the txt file", &_p->dy_txt);
+    phgOptionsRegisterInt("len_txt1D", "length of the 1D txt file", &_p->len_txt1D);
+    phgOptionsRegisterFloat("x_start_txt1D", "start x of the 1D txt file", &_p->x_start_txt1D);
+    phgOptionsRegisterFloat("x_end_txt1D", "end x of the 1D txt file", &_p->x_end_txt1D);
+    phgOptionsRegisterFloat("dx_txt1D", "dx of the 1D txt file", &_p->dx_txt1D);
 
     phgOptionsRegisterNoArg("layered_mesh", "Layered mesh", &_p->layered_mesh);
     //phgOptionsRegisterFloat("slop_alpha", "Slop alpha", &_alpha_);
