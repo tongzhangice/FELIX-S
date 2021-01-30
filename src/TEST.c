@@ -24,7 +24,7 @@ iceInit(GRID *g, LAYERED_MESH **gL_ptr)
     data_thk = read_txt_data(ns_params->thk_txt_file, ns_params->row_txt, ns_params->col_txt);
     //data_bot = read_txt_data(ns_params->bed_txt_file);
 
-    //data_sur_T = read_txt_data(ns_params->surT_txt_file, ns_params->row_txt, ns_params->col_txt);
+    data_sur_T = read_txt_data(ns_params->surT_txt_file, ns_params->row_txt, ns_params->col_txt);
 
     //data_x = read_txt_data(ns_params->x_txt_file, ns_params->row_txt, ns_params->col_txt);
     //data_y = read_txt_data(ns_params->y_txt_file, ns_params->row_txt, ns_params->col_txt);
