@@ -53,7 +53,12 @@ void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a,
 	i = (int) (x - xllcorner)/dx;
 	j = (int) (y - yllcorner)/dy;
 
+    //phgPrintf("x, y %f %f\n", x, y);
+    //phgPrintf("i, j %d %d\n", i, j);
+
     if (i<col-1 && j<row-1){
+
+        //phgPrintf("i, j %d %d\n", i, j);
 		
         a00 = data[row-j-2][i];
 	    a01 = data[row-j-1][i];	    

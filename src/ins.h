@@ -342,6 +342,8 @@ typedef struct NSParams_ {
     char *sur_txt_file;
     char *surT_txt_file;
     char *thk_txt_file;
+    char *ux_txt_file;
+    char *uy_txt_file;
     char *x_txt_file;
     char *y_txt_file;
     char *sur_grad_x_txt_file;

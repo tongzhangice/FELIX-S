@@ -486,6 +486,61 @@ phgNSBuildSolverURHS(NSSolver *ns, INT IF_DB, INT nonstep, FLOAT Time)
 		    }	  /* end of face outflow */
 		}
 	    }		  /* end of compensate equations */
+
+		for (s = 0; s < NFace; s++) {
+		    if (e->bound_type[s] & BC_LATERL) {
+		
+            FLOAT lambda[Dim+1], lambda_x, lambda_y, lambda_z, surHeight;
+            INT quad_order = 5;
+            FLOAT Ns;
+            FLOAT vu[Dim];
+            QUAD *quad = phgQuadGetQuad2D(quad_order);
+            FLOAT *p = quad->points;
+            FLOAT *w = quad->weights;
+            FLOAT area = phgGeomGetFaceArea(g, e, s);
+            const FLOAT *normal = phgGeomGetFaceOutNormal(g, e, s);
+		FLOAT nx1, ny1, nz1;
+
+            INT M_face = 3*(ns->du->type->np_vert + ns->du->type->np_edge);
+            SHORT bas_idx_e[M_face];
+
+            phgDofGetBasesOnFace(ns->du, e, s, bas_idx_e);
+            
+            INT v0 = GetFaceVertex(s, 0);
+            INT v1 = GetFaceVertex(s, 1);
+            INT v2 = GetFaceVertex(s, 2);
+            lambda[s] = 0;
+
+
+            FLOAT dt1 = ns->dt[0];
+
+            for (q = 0; q < quad->npoints; q++)
+            {
+                lambda[v0] = *(p++);
+                lambda[v1] = *(p++);
+                lambda[v2] = *(p++);
+
+                phgGeomLambda2XYZ(g, e, lambda, &lambda_x, &lambda_y, &lambda_z);
+                func_ice_sur(lambda_x, lambda_y, lambda_z, &surHeight);
+                //phgPrintf("sur z %f %f\n", surHeight, lambda_z);
+                phgDofEval(ns->u[1], e, lambda, vu);
+                
+                const FLOAT *bas = ns->du->type->BasFuncs(ns->du, e, 0, -1, lambda);
+
+                for (i = 0; i < M_face; i++)
+                {
+                    INT i_e = bas_idx_e[i];
+                    const FLOAT *bas_i = phgQuadGetBasisValues(e, ns->du, i_e, quad);
+                    for (k = 0; k < Dim; k++)
+                    {
+                        rhsu[i_e][k] += area*w[q]*RHO_ICE*GRAVITY*
+                            (-surHeight+lambda_z)*bas[i_e]
+                            *normal[k]*EQU_SCALING;
+                    }
+                }
+            } /* end of quad point */
+		    }	  /* end of face outflow */
+		}
 	    
 	}           
 

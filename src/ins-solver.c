@@ -42,6 +42,8 @@ phgParametersCreate()
     phgOptionsRegisterFilename("sur_txt_file", "Mesh file", (char **)&_p->sur_txt_file);
     phgOptionsRegisterFilename("surT_txt_file", "Mesh file", (char **)&_p->surT_txt_file);
     phgOptionsRegisterFilename("thk_txt_file", "Mesh file", (char **)&_p->thk_txt_file);
+    phgOptionsRegisterFilename("ux_txt_file", "Mesh file", (char **)&_p->ux_txt_file);
+    phgOptionsRegisterFilename("uy_txt_file", "Mesh file", (char **)&_p->uy_txt_file);
     phgOptionsRegisterFilename("x_txt_file", "Mesh file", (char **)&_p->x_txt_file);
     phgOptionsRegisterFilename("y_txt_file", "Mesh file", (char **)&_p->y_txt_file);
     phgOptionsRegisterFilename("sur_grad_x_txt_file", "Mesh file", (char **)&_p->sur_grad_x_txt_file);
@@ -281,7 +283,7 @@ phgNSCreate(GRID *g, NSParams *ns_params0)
     /* Set initial values only at boundary.
      * For enclosed flow, pinned node has not been decided,
      *   so it is useless to set pinned node value here. */
-    //phgDofSetBdryDataByFunction(u[1], func_u, SETFLOW);
+    phgDofSetBdryDataByFunction(u[1], func_u, BC_TOP);
 #else
     /* Set initial values in whole domain */
     phgDofSetDataByFunction(u[1], func_u);

@@ -63,12 +63,12 @@ ice_grid(GRID *g)
             }
             
 		    Area[1] += a;
-		} else if (fabs(1 - INNER_PRODUCT(n, n_terminus)) < eps){
-            e->bound_type[s] = BC_TERMNS;
-        }
-        else if (fabs(1-INNER_PRODUCT(n, n_divide)) < eps){
-            e->bound_type[s] = BC_DIVIDE;
-        }
+		} //else if (fabs(1 - INNER_PRODUCT(n, n_terminus)) < eps){
+          //  e->bound_type[s] = BC_TERMNS;
+        //}
+        //else if (fabs(1-INNER_PRODUCT(n, n_divide)) < eps){
+        //    e->bound_type[s] = BC_DIVIDE;
+        //}
         else{
 		    if (g->period == NULL) { /* non-periodic boundary is lateral */
 			e->bound_type[s] = BC_LATERL;

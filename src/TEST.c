@@ -6,6 +6,7 @@
 //static double *data_sur, *data_thk, **data_x, **data_y;
 
 static double **data_bot, **data_sur, **data_thk, **data_x, **data_y, **data_sur_T;
+static double **data_ux, **data_uy;
 //double** read_txt_data(char *file_name, int row, int col);
 //void interp_txt_data(double **data, double x, double y, double z, double *a);
 
@@ -22,9 +23,12 @@ iceInit(GRID *g, LAYERED_MESH **gL_ptr)
     //data_thk = read_txt_data_1D(ns_params->thk_txt_file);
     data_sur = read_txt_data(ns_params->sur_txt_file, ns_params->row_txt, ns_params->col_txt);
     data_thk = read_txt_data(ns_params->thk_txt_file, ns_params->row_txt, ns_params->col_txt);
+    //data_bot = read_txt_data(ns_params->bed_txt_file, ns_params->row_txt, ns_params->col_txt);
     //data_bot = read_txt_data(ns_params->bed_txt_file);
 
     data_sur_T = read_txt_data(ns_params->surT_txt_file, ns_params->row_txt, ns_params->col_txt);
+    data_ux = read_txt_data(ns_params->ux_txt_file, ns_params->row_txt, ns_params->col_txt);
+    data_uy = read_txt_data(ns_params->uy_txt_file, ns_params->row_txt, ns_params->col_txt);
 
     //data_x = read_txt_data(ns_params->x_txt_file, ns_params->row_txt, ns_params->col_txt);
     //data_y = read_txt_data(ns_params->y_txt_file, ns_params->row_txt, ns_params->col_txt);
@@ -149,8 +153,13 @@ void func_ice_slab(FLOAT x, FLOAT y, FLOAT z, FLOAT *coord)
     //bed = -100 - 0.06*x;
     //thk = 300;
 
+    //x = x + 176.50e3;
+    //y = y + 458e3;
+
 	interp_txt_data(data_sur, x, y, z, &sur, ns_params->row_txt, ns_params->col_txt, 
             ns_params->xllcorner_txt, ns_params->yllcorner_txt, ns_params->nodata_value_txt, ns_params->dx_txt, ns_params->dy_txt);
+	//interp_txt_data(data_sur, x, y, z, &sur, ns_params->row_txt, ns_params->col_txt, 
+    //        ns_params->xllcorner_txt, ns_params->yllcorner_txt, ns_params->nodata_value_txt, ns_params->dx_txt, ns_params->dy_txt);
 	interp_txt_data(data_thk, x, y, z, &thk, ns_params->row_txt, ns_params->col_txt, 
             ns_params->xllcorner_txt, ns_params->yllcorner_txt, ns_params->nodata_value_txt, ns_params->dx_txt, ns_params->dy_txt);
     /*
@@ -206,6 +215,17 @@ void func_T_sur(FLOAT x, FLOAT y, FLOAT z, FLOAT *temp)
             ns_params->xllcorner_txt, ns_params->yllcorner_txt, ns_params->nodata_value_txt, ns_params->dx_txt, ns_params->dy_txt);
 
 	temp[0] = sur_T + 273.15;
+}
+
+void
+func_ice_sur(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_sur)
+{
+    double sur;
+    x *= 1;
+    y *= 1;
+	interp_txt_data(data_sur, x, y, z, &sur, ns_params->row_txt, ns_params->col_txt, 
+            ns_params->xllcorner_txt, ns_params->yllcorner_txt, ns_params->nodata_value_txt, ns_params->dx_txt, ns_params->dy_txt);
+    ice_sur[0] = sur;
 }
 
 /*
@@ -446,8 +466,14 @@ void func_u(FLOAT x, FLOAT y, FLOAT z, FLOAT *u) {
     /* w */
     u[2] = 0;
 #else
-#  warning func_u = zero
-    u[0] = u[1] = u[2] = 0.;
+    FLOAT ux, uy;
+	interp_txt_data(data_ux, x, y, z, &ux, ns_params->row_txt, ns_params->col_txt, 
+            ns_params->xllcorner_txt, ns_params->yllcorner_txt, ns_params->nodata_value_txt, ns_params->dx_txt, ns_params->dy_txt);
+	interp_txt_data(data_uy, x, y, z, &uy, ns_params->row_txt, ns_params->col_txt, 
+            ns_params->xllcorner_txt, ns_params->yllcorner_txt, ns_params->nodata_value_txt, ns_params->dx_txt, ns_params->dy_txt);
+    u[0] = ux;
+    u[1] = uy;
+    u[2] = 0.0;
 #endif
 }
 
@@ -549,9 +575,14 @@ set_boundary_mask(NSSolver *ns)
 {
 #if !USE_SLIDING_BC
 #   warning BD mask set to (x,x,x)
+    /*
     BTYPE DB_masks[3] = {BC_BOTTOM|BC_DIVIDE|BC_TERMNS|BC_LATERL,
 			 BC_BOTTOM|BC_LATERL|BC_TERMNS|BC_DIVIDE,
 			 BC_BOTTOM|BC_LATERL|BC_TERMNS|BC_DIVIDE};
+             */
+    BTYPE DB_masks[3] = {BC_BOTTOM|BC_DIVIDE|BC_TERMNS|BC_TOP,
+			 BC_BOTTOM|BC_TERMNS|BC_DIVIDE|BC_TOP,
+			 BC_BOTTOM|BC_TERMNS|BC_DIVIDE};
 #else
 #   warning BD mask set to (x,x,0)
     BTYPE DB_masks[3] = {BC_DIVIDE|BC_BOTTOM_GRD,
