@@ -1,4 +1,4 @@
-# FELIX-S
+# FELIX-S-FO
 full Stokes ice sheet model
 
 # A brief tutorial of FELIX-S
