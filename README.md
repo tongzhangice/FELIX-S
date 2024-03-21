@@ -2,7 +2,7 @@
 A full Stokes and higher-order ice sheet model
 
 # A brief tutorial 
-The source files are placed in the folder "FELIXS". The "$dir" below refers to the directory of your "FELIXS" folder.
+The source files are placed in the folder "src".
 
 ## Meshing
 ### Install Ann
