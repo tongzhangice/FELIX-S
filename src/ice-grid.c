@@ -1,3 +1,10 @@
+/*
+ *  Build anisotropic prism grid of benchmark A or B.
+ *
+ *  Do we need ISOP ??? Make simple one first, no ISOP.
+ *  
+ */
+
 #include "phg.h"
 #include "ins.h"
 #include "mat_op3.h"
@@ -5,26 +12,195 @@
 #include <math.h>
 #include "layers.h"
 
-#define _nsp (ns->ns_params)
+#define _nsp (ns_params)
+
+
+
+void
+func_ice_slab(FLOAT x, FLOAT y, FLOAT z, FLOAT *coord)
+/* Ice surf and bottom */
+/* Input: mesh coord (km), have not shifted to real coord.
+ * Output: z coord (km)
+ * */
+{
+    /* bedrock */
+    FLOAT zbot, ztop, hz;
+
+
+    /*
+     * Suppose the subregion begins at (x1, y1),
+     *  and its local coord in mesh file is (x2, y2), 
+     * then the topo shift is
+     *   x_real = x_mesh - x2 + x1
+     *          = x_mesh - (x2 - x1)
+     *          = x_mesh - shift_x
+     *
+     * shift_x = x2 - x1
+     * 
+     *  */
+    x -= _nsp->topo_shift_x;
+    y -= _nsp->topo_shift_y;
+
+    coord[0] = x;		/* unit: km */
+    coord[1] = y;
+
+    ztop = interp_topo_data('t', x, y);
+    hz   = interp_topo_data('h', x, y);
+    zbot = ztop - hz;
+    /* Note: the surface is adjusted with minimum height, while the bottom is unchanged. */
+
+#if SIMPLE_TEST
+    SIMPLE_INIT_SLOP;
+    ztop = - x * tan_alpha;
+    zbot = ztop - 1.;
+    Hz = 1.;
+#endif
+
+    
+    if (hz < eps_height) {
+	hz = eps_height;
+
+	static FLOAT x_record = -100000, y_record = -100000;
+	if (x != x_record && y != y_record) {
+	    phgInfo(0, "Set small heigh %fm to 1m at (%f %f) \n", 
+		       hz, x, y);
+	    x_record = x;
+	    y_record = y;
+	}
+    }
+
+    coord[2] = ztop - hz * (1-z) ;
+    //phgInfo(0, "ztop: %f, zbot: %f, coord %f\n", ztop, zbot, coord[2]);
+
+    return;
+}
+
+
+
+FLOAT 
+func_ice_topg(FLOAT x, FLOAT y)
+/* Ice bedrock topology */
+/* Input: mesh coord (km), 
+ * Output: z coord (km)
+ * */
+{
+    /*
+     * Suppose the subregion begins at (x1, y1),
+     *  and its local coord in mesh file is (x2, y2), 
+     * then the topo shift is
+     *   x_real = x_mesh - x2 + x1
+     *          = x_mesh - (x2 - x1)
+     *          = x_mesh - shift_x
+     *
+     * shift_x = x2 - x1
+     * 
+     *  */
+    x -= _nsp->topo_shift_x;
+    y -= _nsp->topo_shift_y;
+
+    FLOAT zbot = interp_topo_data('b', x, y);
+
+    return zbot;
+}
+
+
+void 
+func_normal(FLOAT x, FLOAT y, FLOAT z, FLOAT *value)
+{
+    phgError(0, "Unimplemented!!!\n");
+}
+
+
 
 /*
  * Init ice grid using ice height.
  * */
-//GEO_INFO *
-void
-ice_grid(GRID *g)
+void ice_grid(GRID *g)
 {
     SIMPLEX *e;
     INT i, k, s;
-    DOF *coord = phgDofNew(g, DOF_P1, Dim, "coord", func_ice_slab);
-    DOF *ice_shelf_mask = phgDofNew(g, DOF_P3, 1, "ice_shelf_mask", func_ice_shelf_mask);
-    phgExportVTK(g, "ice_shelf_mask.vtk", ice_shelf_mask, NULL);
+    DOF *mapping;
     FLOAT *v0, *v1, Area[5];
     const FLOAT eps = 1e-8;
+
+
+    /* set utype and ptype */
+    if (ns_params->mapping_type == NULL) {
+	char s[128];
+	phgOptionsPush();
+
+	sprintf(s, "-dof_type %s", ns_params->isop_type_name);
+	phgOptionsSetOptions(s);
+	ns_params->mapping_type = DOF_DEFAULT;
+
+	phgOptionsPop();
+    }
+
+    phgInfo(0, "g: %x, nvert: %d\n", g, g->nvert);
+
+    phgExportVTK(g, "iceDomainSigma.vtk", NULL, NULL);
+    /* temporarily save ice domain vtk file with sigma coordinate
+     * for the convinience of manipulating layered data */
     
+    /* Load topo data */
+    load_topo_data(ns_params->topo_file);
+
+
+    if (g->period) {
+	/* Period */
+	GRID *gnp; 
+	phgInfo(0, "Build *PERIOD* grid mapping.\n");
+	
+	/* Step 1. Dup grid */
+	g->non_period = phgNewGrid(-1);
+	phgImportSetBdryMapFunc(my_bc_map);
+	if (!phgImport(g->non_period, g->filename, FALSE))
+	    phgError(1, "can't read file \"%s\".\n", g->filename);
+	gnp = g->non_period;
+
+	/* Step 2. Build mapping */
+	mapping = phgDofNew(gnp, ns_params->mapping_type,
+			    Dim, "mapping", func_ice_slab); 
+	gnp->mapping = mapping;
+
+	/* Build edge mapping */
+	{
+	    g->map_edge_n2p   = phgCalloc(gnp->nedge, sizeof(INT));
+	    
+	    ForAllElements(g, e) {
+		SIMPLEX *ee = g->non_period->elems[e->index];
+		assert(ee->index == e->index);
+		for (i = 0; i < NVert; i++)
+		    assert(e->verts[i] == ee->verts[i]);
+		for (i = 0; i < NEdge; i++) {
+		    int edge    = e->edges[i];
+		    int edge_np = ee->edges[i];
+
+		    g->map_edge_n2p[edge_np] = edge;
+		}
+	    }
+	}
+    }
+    else {
+	/* Non period */
+
+	phgInfo(0, "Build non period grid mapping.\n");
+
+	g->non_period = NULL;
+	mapping = phgDofNew(g, ns_params->mapping_type,
+			    Dim, "mapping", func_ice_slab); 
+	g->mapping = mapping;
+
+	g->map_edge_n2p = NULL;
+    }
+    //phgDofDump(GetGeomMapping(g));
+
+    
+
     Unused(k);
     Unused(eps);
     bzero(Area, sizeof(Area));
+
 
     /* ----------------------------------------
      * 
@@ -37,7 +213,8 @@ ice_grid(GRID *g)
 	phgPrintf("Update boundary type by 2D mesh.\n");
 	ForAllElements(g, e) {
 	    for (s = 0; s < NFace; s++) {
-		FLOAT a, n_top[] = {0, 0, 1}, n_bottom[] = {0, 0, -1}, n_terminus[] = {1, 0, 0}, n_divide[] = {-1, 0, 0};
+		FLOAT a, n_top[] = {0, 0, 1}, n_bottom[] = {0, 0, -1};
+        FLOAT n_terminus[] = {1, 0, 0}, n_divide[] = {-1, 0, 0};
 		const FLOAT *n;
 
 		e->bound_type[s] &= ~DIRICHLET;
@@ -52,35 +229,14 @@ ice_grid(GRID *g)
 		    Area[0] += a;
 		} else if (fabs(1 - INNER_PRODUCT(n, n_bottom)) < eps) {
 		    e->bound_type[s] = BC_BOTTOM; /* clear other */
-		    
-            if (ns_params->add_ice_shelf){
-
-            if (*DofFaceData(ice_shelf_mask, e->faces[s])<1.1 && *DofFaceData(ice_shelf_mask, e->faces[s]) > 0) {
-                e->bound_type[s] = (BC_ISHELF | BC_BOTTOM);
-            }
-            else
-                e->bound_type[s] = (BC_BOTTOM_GRD | BC_BOTTOM);
-            }
-            
 		    Area[1] += a;
-		} else if (fabs(1 - INNER_PRODUCT(n, n_terminus)) < eps){
-            e->bound_type[s] = BC_TERMNS;
-        }
-        else if (fabs(1-INNER_PRODUCT(n, n_divide)) < eps){
+        } else if (fabs(1 - INNER_PRODUCT(n, n_terminus)) < eps){
+            e->bound_type[s] = BC_FRONT;
+        } else if (fabs(1-INNER_PRODUCT(n, n_divide)) < eps){
             e->bound_type[s] = BC_DIVIDE;
-        }
-        else{
+        } else {
 		    if (g->period == NULL) { /* non-periodic boundary is lateral */
-			e->bound_type[s] = BC_LATERL;
-            if (0){
-
-            if (*DofFaceData(ice_shelf_mask, e->faces[s]) <1.1 && *DofFaceData(ice_shelf_mask, e->faces[s]) > 0) {
-                e->bound_type[s] = (BC_ISHELF | BC_LATERL);
-            }
-            else
-                e->bound_type[s] = (BC_LATERL_GRD | BC_LATERL);
-            }
-            
+			e->bound_type[s] = BC_LATERAL;
 			Area[2] += a;
 			continue;
 		    }
@@ -95,31 +251,32 @@ ice_grid(GRID *g)
     }
     else {
 	
-	ForAllElements(g, e) {
-	    for (s = 0; s < NFace; s++) {
-		FLOAT a = phgGeomGetFaceArea(g, e, s);
-		if (e->bound_type[s] & BC_TOP)
-		    Area[0] += a;
-		else if (e->bound_type[s] & BC_BOTTOM)
-		    Area[1] += a;
-		else if (e->bound_type[s] & BC_LATERL)
-		    Area[2] += a;
-		else if (e->bound_type[s] & DIRICHLET)
-		    Area[3] += a;
-		else
-		    Area[4] += a;
-	    }
-	}
+	/* ForAllElements(g, e) { */
+	/*     for (s = 0; s < NFace; s++) { */
+	/* 	FLOAT a = phgGeomGetFaceArea(g, e, s); */
+	/* 	if (e->bound_type[s] & BC_TOP) */
+	/* 	    Area[0] += a; */
+	/* 	else if (e->bound_type[s] & BC_BOTTOM) */
+	/* 	    Area[1] += a; */
+	/* 	else if (e->bound_type[s] & BC_LATERAL) */
+	/* 	    Area[2] += a; */
+	/* 	else if (e->bound_type[s] & DIRICHLET) */
+	/* 	    Area[3] += a; */
+	/* 	else */
+	/* 	    Area[4] += a; */
+	/*     } */
+	/* } */
+
     }
 	    
 
-    phgPrintf("--------------------\n");
-    phgPrintf("Set up boundary type\n");
-    phgPrintf("  Area top   : %lf\n", Area[0]);
-    phgPrintf("  Area bottom: %lf\n", Area[1]);
-    phgPrintf("  Area laterl: %lf\n", Area[2]);
-    phgPrintf("  Area dirich: %lf\n", Area[3]);
-    phgPrintf("  Area other : %lf\n", Area[4]);
+    /* phgPrintf("--------------------\n"); */
+    /* phgPrintf("Set up boundary type\n"); */
+    /* phgPrintf("  Area top   : %lf\n", Area[0]); */
+    /* phgPrintf("  Area bottom: %lf\n", Area[1]); */
+    /* phgPrintf("  Area laterl: %lf\n", Area[2]); */
+    /* phgPrintf("  Area dirich: %lf\n", Area[3]); */
+    /* phgPrintf("  Area other : %lf\n", Area[4]); */
 
 
     /* ----------------------------------------
@@ -127,66 +284,71 @@ ice_grid(GRID *g)
      *   Map to physical region
      * 
      * ---------------------------------------- */
+#if 0    
     ForAllElements(g, e) {
-	//v1 = DofElementData(coord, e->index);
+	v1 = DofElementData(coord, e->index);
 	for (i = 0; i < NVert; i++) {
 	    v0 = g->verts[e->verts[i]];
-	    //memcpy(v0, v1 + i * Dim, Dim*sizeof(*v0));
-        memcpy(v0, DofVertexData(coord, e->verts[i]), Dim*sizeof(*v0));
+	    memcpy(v0, v1 + i * Dim, Dim*sizeof(*v0));
 	}
     }
 
+    /* Update geom */
     phgGeomInit_(g, TRUE);
+#else
+    phgGeomUpdateByMapping(g);
+#endif    
 
-#if TEST_CASE == ICE_BENCH_E
-    /* for partition */
-    ForAllElements(g, e) {
-	int gid = e->region_mark;
-	e->region_mark = 10 * (gid);
+    
+    /* Update bbox, might use in oct-search */
+    {
+	FLOAT xb[6] = {1e10, -1e10, 1e10, -1e10, 1e10, -1e10}, xB[6];
+	for (i = 0; i < g->nvert; i++) {
+	    const FLOAT *x = g->verts[i];
+	    for (k = 0; k < Dim; k++) {
+		if (x[k] < xb[2*k + 0]) xb[2*k + 0] = x[k];
+		if (x[k] > xb[2*k + 1]) xb[2*k + 1] = x[k];
+	    }
+	}
+
+	xb[0] *= -1;
+	xb[2] *= -1;
+	xb[4] *= -1;
+	MPI_Allreduce(&xb, &xB, 6, PHG_MPI_FLOAT, MPI_MAX, g->comm);
+	xB[0] *= -1;
+	xB[2] *= -1;
+	xB[4] *= -1;
+
+	for (k = 0; k < Dim; k++) {
+	    g->bbox[0][k] = xB[2*k+0];
+	    g->bbox[1][k] = xB[2*k+1];
+	    phgInfo(0, "BBox[%d]: %e %e\n",
+		    k, g->bbox[0][k], g->bbox[1][k]);
+	}
     }
+    
+
+
+#if 0
+    for (i = 0; i < g->nvert; i++)
+	phgInfo(0, "vert[%4d]: %e %e %e\n", i,
+		g->verts[i][0],
+		g->verts[i][1],
+		g->verts[i][2]
+		);
 #endif
 
-    /*
-    DOF *mask_bot = phgDofNew(g, DOF_P1, 1, "mask bot", DofNoAction);
-
-
-    ForAllElements(g, e)
-    {
-        for (s = 0; s < NFace; s++)
-        {
-            if (e->bound_type[s] & BC_ISHELF)
-            {
-                printf("Ice shelf !!!!\n");
-                for (i = 0; i < 3; i++)
-                {
-                    INT v = GetFaceVertex(s, i);
-                    INT local_idx = e->verts[v];
-
-                    *DofVertexData(mask_bot, local_idx) = 1;
-                    //FLOAT *mask = *DofVertexData(mask_bot, local_idx) = 1;
-                    //mask[0] = 1;
-                }
-            }
-            else if (e->bound_type[s] == (BC_BOTTOM|BC_BOTTOM_GRD))
-            {
-                for (i = 0; i < 3; i++)
-                {
-                    INT v = GetFaceVertex(s, i);
-                    INT local_idx = e->verts[v];
-
-                    FLOAT *mask = DofVertexData(mask_bot, local_idx);
-                    mask[0] = -1;
-                }
-            }
-        }
+    if (0) {
+	if (g->mapping != NULL)
+	    phgExportVTK(g, "mapped.vtk", mapping, NULL);
+	else
+	    phgExportVTK(g->non_period, "mapped.vtk",
+			 g->non_period->mapping, NULL);
     }
-    phgExportVTK(g, "mask.vtk", mask_bot, NULL);
-    */
+    //phgExportMedit(g, "mapped.mesh");
 
-    phgExportVTK(g, "TEST11.vtk", NULL);
-    phgDofFree(&coord);
-    phgDofFree(&ice_shelf_mask);
-    //return geo;
+    
+    //phgDofFree(&coord);
     return;
 }
 
@@ -198,6 +360,107 @@ iceParter(GRID *g, int nprocs, DOF *weights, FLOAT power)
     /* e->mark is some where else, e.g. set by ice-grid */
     return TRUE;
 }
+
+
+
+
+/* ------------------------------------------------------------
+ *    
+ *    Ice grid
+ *    
+ * ------------------------------------------------------------ */
+void 
+iceInit(GRID *g, LAYERED_MESH **gL_ptr)
+{
+    LAYERED_MESH *gL;
+    SIMPLEX *e;
+
+    /* Build ice grid with given func_ice_slab */
+    ice_grid(g);
+    checkBdry(g);
+
+
+    /* build layered mesh, globally */
+    gL = import_layered_mesh(ns_params->fn);
+    if (phgRank == 0
+	&& g->nvert != gL->nvert * (gL->max_nlayer + 1) ) {
+	printf("Some 3d verts may be too close and merged, "
+	       "(%d --> %d) or 2d (%d --> %d), "
+	       "causing build map of 3d mesh to 2d layered mesh failed!!!\n",
+	       g->nvert, gL->nvert * (gL->max_nlayer + 1),
+	       g->nvert / (gL->max_nlayer + 1), gL->nvert
+	       );
+	phgError(-1, "build layered mesh failed.\n");
+    }
+    build_layered_mesh(g, gL);
+
+#if 0
+#  warning Part info in mesh NOT unsed
+    /* Read the partition info from region_mark. */
+    ForAllElements(g, e) {
+	e->mark = e->region_mark / 10;
+	e->region_mark = 0;
+    }
+#else
+    part_layered_mesh(g, gL);	/* Partition saved in e->mark. */
+    destory_layerd_mesh(&gL);
+
+    if (g->non_period != NULL) {
+	/* Same partition for periodic grid copy */
+	ForAllElements(g, e) {
+	    SIMPLEX *ee = g->non_period->elems[e->index];
+	    assert(ee->index == e->index);
+	    ee->mark = e->mark;	
+	}
+    }
+#endif
+
+    /*
+     * 
+     * Warning: must set partitioner to user !!!
+     *
+     *  */
+    phgPartUserSetFunc(iceParter);
+    if (g->non_period != NULL) {
+	GRID *g_np = g->non_period;
+	phgRedistributeGrid(g);
+	phgRedistributeGrid(g_np);
+	g->non_period = g_np;
+    } else {
+	phgRedistributeGrid(g);
+    }
+    phgPrintf("\nRepartition mesh, %d submesh%s, load imbalance: %lg",
+		  g->nprocs, g->nprocs > 1 ? "es" : "", (double)g->lif);
+    elapsed_time(g, TRUE, phgPerfGetMflops(g, NULL, NULL));
+    if (ns_params->output_parted)
+		phgExportVTK(g, OUTPUT_DIR "parted.vtk", NULL);
+
+
+    /* build layered mesh, locally */
+    gL = import_layered_mesh(ns_params->fn);
+    build_layered_mesh(g, gL);
+
+    if (0) phgExportVTK(g, OUTPUT_DIR "/ins_" NS_PROBLEM "_init.vtk", NULL);
+
+    /* init fv solver */
+    fv_solver_init(&gL->fv_data,
+		   ns_params->fn,
+		   gL->verts,
+		   func_q_t);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    
+    *gL_ptr = gL;
+    return;
+}
+
+
+
+
+
+
+
 
 
 
@@ -228,10 +491,7 @@ static void phgNSInitSolverGu(NSSolver *ns)
 
     /* solver_Gu */
     phgOptionsPush();
-    phgOptionsSetOptions("-solver petsc "
-			 "-solver_maxit 10000 "
-			 "-solver_rtol 1e-10");
-    //phgOptionsSetOptions(Gu_opts);
+    phgOptionsSetOptions(ns_params->proj_opts);
     phgVerbosity = 0;
     solver_Gu = phgMat2Solver(SOLVER_DEFAULT, matGu);
     phgVerbosity = verb;
@@ -261,7 +521,7 @@ phgNSBuildSolverGu(NSSolver *ns)
 	int M = Gradu->type->nbas;	/* num of bases of Velocity */
 	int order = DofTypeOrder(Gradu, e) * 2;
 	FLOAT A[M][DDim][M][DDim], rhs[M][DDim];
-	INT I[M][DDim];
+	INT I_[M][DDim];
 	QUAD *quad;
 	FLOAT vol, det;
 	const FLOAT *w, *p, *gu;
@@ -295,13 +555,13 @@ phgNSBuildSolverGu(NSSolver *ns)
 	/* Map: Element -> system */
 	for (i = 0; i < M; i++)
 	    for (k = 0; k < DDim; k++)
-		I[i][k] = phgMapE2L(matGu->cmap, 0, e, i * DDim + k);
+		I_[i][k] = phgMapE2L(matGu->cmap, 0, e, i * DDim + k);
 
 	/* Global res */
 	for (i = 0; i < M; i++)
-	    phgMatAddEntries(matGu, DDim, I[i], M * DDim, I[0],
+	    phgMatAddEntries(matGu, DDim, I_[i], M * DDim, I_[0],
 			     &(A[i][0][0][0])); 
-	phgSolverAddRHSEntries(solver_Gu, M*DDim, I[0], &rhs[0][0]);
+	phgSolverAddRHSEntries(solver_Gu, M*DDim, I_[0], &rhs[0][0]);
     }				/* end element */
     
     phgVecAssemble(solver_Gu->rhs);
@@ -312,11 +572,6 @@ phgNSBuildSolverGu(NSSolver *ns)
 	phgMatDumpMATLAB(solver_Gu->mat, "A_gu", "mat_gu_.m");
 	phgVecDumpMATLAB(solver_Gu->rhs, "b_gu", "rhs_gu_.m");
     }
- 
-    phgOptionsPush();
-    phgOptionsSetOptions(_nsp->Gu_opts);
-    phgSolverAssemble(solver_Gu);
-    phgOptionsPop();
  
     return;
 }
@@ -356,7 +611,7 @@ get_layer_height(FLOAT *H, int nv, const FLOAT *ratio, FLOAT h0, FLOAT h1)
 }
 
 
-#if 1
+#if 0
 
 /*
  * ----------------------------------------------------------------------
@@ -576,7 +831,7 @@ ice_monitor(NSSolver *ns, int nonstep)
 
 
 
-#else
+#elif 0
 
 #  define MATCH_EDGE(v0, v1, vL0, vL1)		\
     ((v0 == vL0 && v1 == vL1)			\

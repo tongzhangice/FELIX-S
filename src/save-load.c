@@ -25,7 +25,7 @@
  *  */
 
 #include "phg.h"
-#include "io.h"
+#include "phg/io.h"
 #include <string.h>
 #include <math.h>
 
@@ -34,10 +34,14 @@
 //#define GlobalElem(g,no) GlobalElement(g, no)
 #define NElem 0
 
-#define GetElementVertGMap(e, M)			\
-    GetElementVertices(e, 0, M[0], M[1], M[2], M[3]);
-#define GetElementFaceGMap(e, M)			\
-    GetElementVertices(e, 0, M[0], M[1], M[2], M[3]);
+#define GetElementVertGMap(e, M) {					\
+	int _v;								\
+	GetElementVertices(e, 0, M[0], M[1], M[2], M[3], _v, _v, _v, _v); \
+    }
+#define GetElementFaceGMap(e, M) {					\
+	int _v;								\
+	GetElementVertices(e, 0, M[0], M[1], M[2], M[3], _v, _v, _v, _v); \
+    }
 
 static DOF *elem_id = NULL;
 
@@ -524,3 +528,381 @@ phgResumeLogUpdate(GRID *g, FLOAT *time, int *tstep, char *mesh_file, char *data
     return;
 }
 
+
+
+
+/* --------------------------------------------------------------------------------
+ *
+ *
+ * Save load using pnetcdf
+ *
+ * 
+ * -------------------------------------------------------------------------------- */
+#include <pnetcdf.h>
+#define NAME_MAX_LENGTH 256
+
+
+static void
+handle_error(int status, int lineno)
+{
+    fprintf(stderr, "Error at line %d: %s\n", lineno, ncmpi_strerror(status));
+    MPI_Abort(MPI_COMM_WORLD, 1);
+}
+
+static char *save_prefix = "output/step";
+static char *load_prefix = "output/step";
+
+
+void
+save_state(int tstep, double time, int ndof, DOF **dofs, char **dof_names)
+//
+// Create netcdf files to store the current state:
+//   step#tstep.nc:
+//   containig: time, dofs
+//   ...
+//
+{
+    int nprocs = phgNProcs, rank = phgRank;
+    int ret, ncfile, dimid, ndims=1;
+    MPI_Offset start, count=1;
+    char file_name[NAME_MAX_LENGTH], tmp_str[NAME_MAX_LENGTH];
+
+    MPI_Offset ndat[ndof];
+    MPI_Offset cnts[nprocs][ndof];
+    MPI_Offset offs[nprocs+1][ndof];
+    int cnts_int[ndof][nprocs];	 // copy to int type, and transpose
+    int var_id[nprocs], var_part_id[nprocs];
+
+    phgInfo(0, "\n* Save state\n");
+    for (int idof = 0; idof < ndof; idof++) {
+	ndat[idof] = DofGetDataCount(dofs[idof]);
+	phgInfo(0, "dof[%d]: %d\n", idof, ndat[idof]);
+    }
+    MPI_Allgather(&ndat[0], ndof, MPI_OFFSET,
+		  &cnts[0][0], ndof, MPI_OFFSET, MPI_COMM_WORLD);
+
+
+    for (int idof = 0; idof < ndof; idof++) {
+	phgInfo(0, "all dof[%d]: ", idof);
+	offs[0][idof] = 0;
+	for (int p = 0; p < nprocs; p++) {
+	    offs[p+1][idof] = offs[p][idof] + cnts[p][idof];
+	    cnts_int[idof][p] = cnts[p][idof];
+
+	    phgInfo(0, "%d, ", cnts[p][idof]);
+	}
+	phgInfo(0, "\n");
+    }
+
+
+    //
+    //
+    //
+    // Header
+    //
+    //
+    //
+    snprintf(file_name, NAME_MAX_LENGTH, "%s_%05d.nc", save_prefix, tstep);
+
+    ret = ncmpi_create(MPI_COMM_WORLD, file_name,
+		       NC_CLOBBER|NC_64BIT_OFFSET, MPI_INFO_NULL, &ncfile);
+    if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+    // Dims
+    int dimid_np, dimid_ndof, dimid_dof[ndof];
+    ret = ncmpi_def_dim(ncfile, "nprocs", nprocs, &dimid_np);
+    if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+    ret = ncmpi_def_dim(ncfile, "ndof", ndof, &dimid_ndof);
+    if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+
+    // Time
+    ret = ncmpi_put_att_double(ncfile, NC_GLOBAL, "Time",
+			       NC_DOUBLE, 1, &time);
+    if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+    
+    // Dofs dims
+    for (int idof = 0; idof < ndof; idof++) {
+
+	// dof dim
+	sprintf(tmp_str, "length_%s", dof_names[idof]);
+	phgInfo(0, "len[%d] %d\n", idof, offs[nprocs][idof]);
+	ret = ncmpi_def_dim(ncfile, tmp_str, offs[nprocs][idof], &dimid_dof[idof]);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+	ret = ncmpi_def_var(ncfile, dof_names[idof], NC_DOUBLE, 1, &dimid_dof[idof], &var_id[idof]);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+	ret = ncmpi_put_att_text(ncfile, var_id[idof], "long_name",
+				 strlen(dof_names[idof]), dof_names[idof]);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+    	ret = ncmpi_put_att_text(ncfile, var_id[idof], "FE_space",
+				 strlen(dofs[idof]->type->name),
+				 dofs[idof]->type->name);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+	const int dim = dofs[idof]->dim;
+    	ret = ncmpi_put_att_int(ncfile, var_id[idof], "dim",
+				NC_INT, 1, &dim);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+	FLOAT norm_L2 = phgDofNormL2(dofs[idof]);
+    	ret = ncmpi_put_att_double(ncfile, var_id[idof], "L2_norm",
+				NC_DOUBLE, 1, &norm_L2);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+
+    	// ret = ncmpi_put_att_int(ncfile, var_id[idof], "localsize",
+	// 			NC_INT, nprocs, cnts_int[idof]);
+	// if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+	//
+	// localsize as var
+	//
+	sprintf(tmp_str, "%s%s", dof_names[idof], "_part");
+	ret = ncmpi_def_var(ncfile, tmp_str,
+			    NC_INT, 1,
+			    &dimid_np, &var_part_id[idof]);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+	sprintf(tmp_str, "localsize of dof %s", dof_names[idof]);
+	ret = ncmpi_put_att_text(ncfile, var_part_id[idof], "long_name",
+				 strlen(tmp_str),
+				 tmp_str);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+    }
+
+    ret = ncmpi_enddef(ncfile);
+    if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+
+    //
+    //
+    // Data
+    //
+    //
+    for (int idof = 0; idof < ndof; idof++) {
+
+	//
+	// Part
+	// 
+	/* entering independent data mode */
+	ret = ncmpi_begin_indep_data(ncfile);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+	/* independently write values into netCDF variable */
+	if (rank == 0) {
+	    const MPI_Offset start = 0;
+	    const MPI_Offset count = nprocs;
+	    ret = ncmpi_put_vara_int(ncfile, var_part_id[idof],
+				     &start, &count, cnts_int[idof]);
+	    if (ret != NC_NOERR) handle_error(ret, __LINE__);
+	}
+
+	/* exiting independent data mode */
+	ret = ncmpi_end_indep_data(ncfile);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+
+	//
+	// Data
+	// 
+	ret = ncmpi_put_vara_double_all(ncfile, var_id[idof],
+					&offs[rank][idof], &cnts[rank][idof], dofs[idof]->data);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+    }
+
+
+    ret = ncmpi_close(ncfile);
+    if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+    return;
+}
+
+
+
+
+
+
+void
+load_state(int tstep, double *time, int ndof, DOF **dofs, char **dof_names)
+//
+//
+// Note: The dofs are store and loaded with order, and the poisition is the dof id.
+//       On the other hand, the name could be changes.
+//
+//
+{
+    int nprocs = phgNProcs, rank = phgRank;
+    int ret, ncfile, dimid, ndims=1;
+    MPI_Offset start, count=1;
+    char file_name[NAME_MAX_LENGTH], tmp_str[NAME_MAX_LENGTH];
+
+    MPI_Offset ndat[ndof];
+    MPI_Offset cnts[nprocs][ndof];
+    MPI_Offset offs[nprocs+1][ndof];
+    int cnts_int[ndof][nprocs];	 // copy to int type, and transpose
+
+    phgInfo(0, "\n* Load state\n");
+    for (int idof = 0; idof < ndof; idof++) {
+	ndat[idof] = DofGetDataCount(dofs[idof]);
+	phgInfo(0, "dof[%d]: %d\n", idof, ndat[idof]);
+    }
+    MPI_Allgather(&ndat[0], ndof, MPI_OFFSET,
+		  &cnts[0][0], ndof, MPI_OFFSET, MPI_COMM_WORLD);
+
+
+    for (int idof = 0; idof < ndof; idof++) {
+	phgInfo(0, "all dof[%d]: ", idof);
+	offs[0][idof] = 0;
+	for (int p = 0; p < nprocs; p++) {
+	    offs[p+1][idof] = offs[p][idof] + cnts[p][idof];
+	    cnts_int[idof][p] = cnts[p][idof];
+
+	    phgInfo(0, "%d, ", cnts[p][idof]);
+	}
+	phgInfo(0, "\n");
+    }
+
+
+    //
+    //
+    //
+    // Header
+    //
+    //
+    //
+    snprintf(file_name, NAME_MAX_LENGTH, "%s_%05d.nc", save_prefix, tstep);
+
+    ret = ncmpi_open(MPI_COMM_WORLD, file_name,
+		     NC_NOWRITE, MPI_INFO_NULL, &ncfile);
+    if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+    ret = ncmpi_get_att_double(ncfile, NC_GLOBAL, "Time", time);
+    if (ret != NC_NOERR) handle_error(ret, __LINE__);
+    phgInfo(0, "time: %f\n", *time);
+    
+    // Dims
+#define GET_SIZE(name, dim)  {				\
+	int dimid;					\
+	ret = ncmpi_inq_dimid(ncfile, name, &dimid);	\
+	if (ret != NC_NOERR)				\
+	    handle_error(ret, __LINE__);		\
+	ret = ncmpi_inq_dimlen(ncfile, dimid, &size);	\
+	if (ret != NC_NOERR)				\
+	    handle_error(ret, __LINE__);		\
+    }
+
+    MPI_Offset size;
+    GET_SIZE("nprocs", size);
+    if (size != nprocs) {
+	phgError(1, "Saved with %d procs but read with %d procs !!!\n", size, nprocs);
+    }
+
+    GET_SIZE("ndof", size);
+    if (size != ndof) {
+	phgError(1, "Saved %d dofs but read %d dofs !!!\n", size, ndof);
+    }
+
+    // Dofs dims
+    for (int idof = 0; idof < ndof; idof++) {
+	int var_id, var_part_id;
+    	ret = ncmpi_inq_varid(ncfile, dof_names[idof], &var_id);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+	sprintf(tmp_str, "%s%s", dof_names[idof], "_part");
+    	ret = ncmpi_inq_varid(ncfile, tmp_str,
+			      &var_part_id);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+	
+	// dof dim
+	sprintf(tmp_str, "length_%s", dof_names[idof]);
+	GET_SIZE(tmp_str, size);
+	if (size != offs[nprocs][idof]) {
+	    phgError(1, "Saved dof %s size %d but read size %d !!!\n",
+		     dof_names[idof], size, offs[nprocs][idof]);
+	}
+
+
+	// check fe space
+	char fe_space_name[NAME_MAX_LENGTH];
+	MPI_Offset str_len;
+
+	ret = ncmpi_inq_attlen(ncfile, var_id, "FE_space", &str_len);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+    	ret = ncmpi_get_att_text(ncfile, var_id, "FE_space", fe_space_name);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+	fe_space_name[str_len] = '\0';	// Note nc get text has no ending !!!
+
+	if (strcmp(fe_space_name, dofs[idof]->type->name)) {
+	    phgPrintf("Saved dof %s space =%s= but read space =%s=  %d!!!\n",
+		     dof_names[idof], dofs[idof]->type->name,
+		      fe_space_name, strcmp(fe_space_name, dofs[idof]->type->name));
+	    phgError(1, "Saved dof %s space %s but read space %s !!!\n",
+		     dof_names[idof], dofs[idof]->type->name,
+		     fe_space_name);
+	}
+
+
+	// check dof dim
+	int dof_dim;
+    	ret = ncmpi_get_att_int(ncfile, var_id, "dim", &dof_dim);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+	if (dof_dim != dofs[idof]->dim) {
+	    phgError(1, "Saved dof %s dim %d but read dim %d !!!\n",
+		     dof_names[idof], dofs[idof]->dim, dof_dim);
+	}
+
+
+	// check local size
+	int cnts_read[nprocs];
+    	// ret = ncmpi_get_att_int(ncfile, var_id, "localsize", cnts_read);
+	// if (ret != NC_NOERR) handle_error(ret, __LINE__);
+	{
+	    const MPI_Offset start = 0;
+	    const MPI_Offset count = nprocs;
+	    ret = ncmpi_get_vara_int_all(ncfile, var_part_id,
+					 &start, &count, cnts_read); // read by root then bcast ???
+	}
+	for (int p = 0; p < nprocs; p++) {
+	    if (cnts_int[idof][p] != cnts_read[p])
+		phgError(1, "Saved dof %s cnts on proc %d is %d but read %d !!!\n",
+			 dof_names[idof], p, cnts_int[idof][p], cnts_read[p]);
+	}
+
+
+	//
+	// Load data
+	//
+    	ret = ncmpi_get_vara_double_all(ncfile, var_id,
+    					&offs[rank][idof], &cnts[rank][idof], dofs[idof]->data);
+    	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+
+	// check dof norm
+	FLOAT norm_L2 = phgDofNormL2(dofs[idof]), norm_read;
+    	ret = ncmpi_get_att_double(ncfile, var_id, "L2_norm", &norm_read);
+	if (ret != NC_NOERR) handle_error(ret, __LINE__);
+	if (norm_L2 > 0 && fabs(norm_L2 - norm_read) > 1e-8 * norm_L2) {
+	    phgError(1, "Saved dof %s norm %30.15f but read %30.15f !!!\n",
+		     dof_names[idof], norm_L2, norm_read);
+	}
+	phgInfo(0, "Load %s, norm %30.15f %30.15f, err %.10e\n", dof_names[idof],
+		norm_L2, norm_read, fabs(norm_L2 - norm_read)
+		);
+    }
+
+
+
+
+    ret = ncmpi_close(ncfile);
+    if (ret != NC_NOERR) handle_error(ret, __LINE__);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    phgPrintf("Pnetcdf read done.\n");
+
+    return;
+}

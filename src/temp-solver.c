@@ -1,3 +1,48 @@
+/* ================================================================================
+ *
+ *  Nonlinear solver for Temp.
+ *  Equations:
+ *
+ *  rho c dT/dt + rho c u \nabla T - K \Delta T = f    ... (1)
+ *    T = T_0        when z = s                        ... (2)
+ *    K dT/dn = G    when z = b                        ... (3)
+ *    T <= T'                                          ... (*)
+ *  
+ *  We use a nonlinear iterative solver to solve this problem
+ *  For time step k,
+ *    1) Build system with out constrain (*),
+ *       A * x = b
+ *    2) Get marker
+ *    
+ *    3) Change system using marker,
+ *       A ==> A'
+ *       b ==> b'
+ *    4) solve A' x' = b',
+ *    5) if x' does not changes much, end;
+ *       else
+ *    6) compute residual r = b - A*x'
+ *    7) Update marker:
+ *         if T_i > T'_i, mark_i = 1 (constrained)
+ *         if r_i < 0,    mark_i = 0 (free)
+ *    8) Goto 3
+ * 
+ *  In our implementation, both constrain and marker is recorded in
+ *  vector, since it will be more convenient to change matrix and vector.
+ *
+ *  Routines:
+ *  
+ *  1. InitSolver
+ *  2. Build constrain
+ *  3. Build mat
+ *  4. Build rhs
+ *  5. non solve
+ *  6. Destroy solver
+ *
+ *  
+ *
+ *
+ * ================================================================================
+ */
 
 #include "ins.h"
 #include "mat_op3.h"
@@ -76,19 +121,19 @@ phgNSBuildSolverTMat(NSSolver *ns, BOOLEAN init_T)
     FLOAT Theta = _nsp->Theta, nu = _nsp->nu, Thet1;
     FLOAT *dt = ns->dt;
     int viscosity_type = ns->viscosity_type;
+
     
     Unused(dt);
     ForAllElements(g, e) {
 	int M = T[1]->type->nbas;	/* num of bases of Velocity */
 	int order = DofTypeOrder(T[1], e) * 2;
 	FLOAT A[M][M], bufT[M], rhsT[M];
-	INT I[M];
+	INT I_[M];
 	QUAD *quad;
 	FLOAT vol, det, diam;
 	const FLOAT *w, *p, *gu, *vu, *vT, *vT0, *vTe;
 
 	Bzero(A); Bzero(bufT); Bzero(rhsT); 
-
 
 	quad = phgQuadGetQuad3D(order);
 	if (init_T) {
@@ -194,18 +239,17 @@ phgNSBuildSolverTMat(NSSolver *ns, BOOLEAN init_T)
 
 	}
 
-
 	/* Map: Element -> system */
 	for (i = 0; i < M; i++)
-	    I[i] = phgMapE2L(ns->matT->cmap, 0, e, i);
+	    I_[i] = phgMapE2L(ns->matT->cmap, 0, e, i);
 
 	/* Global res */
 	for (i = 0; i < M; i++) {
 	    if (phgDofDirichletBC_(ns->T[1], e, i, NULL, bufT, &rhsT[i],
 				   DOF_PROJ_NONE)) {
-		phgMatAddEntries(ns->matT, 1, I + i, M, I, bufT);
+		phgMatAddEntries(ns->matT, 1, I_ + i, M, I_, bufT);
 	    } else {
-		phgMatAddEntries(ns->matT, 1, I + i, M, I, &(A[i][0])); 
+		phgMatAddEntries(ns->matT, 1, I_ + i, M, I_, &(A[i][0])); 
 	    }
 	}
     }				/* end element */
@@ -222,6 +266,14 @@ phgNSBuildSolverTMat(NSSolver *ns, BOOLEAN init_T)
 }
 
 
+static double _t1 = 0;
+void 
+func_T_wrapper(FLOAT x, FLOAT y, FLOAT z, FLOAT *value)
+{
+    func_T_t(x, y, z, _t1, value);
+}
+
+
 void 
 phgNSBuildSolverTRHS(NSSolver *ns, BOOLEAN init_T)
 {
@@ -235,6 +287,8 @@ phgNSBuildSolverTRHS(NSSolver *ns, BOOLEAN init_T)
     VEC *rhsT = ns->rhsT;
     int viscosity_type = ns->viscosity_type;
 
+    _t1 = ns->time[1];
+
     Unused(dt);
     Unused(j);
     phgVecDisassemble(rhsT);
@@ -242,7 +296,7 @@ phgNSBuildSolverTRHS(NSSolver *ns, BOOLEAN init_T)
 	int s, M = T[1]->type->nbas;	/* num of bases of Velocity */
 	int order = DofTypeOrder(T[1], e) * 2;
 	FLOAT rhs[M], buf[M], T_value[M];
-	INT I[M];
+	INT I_[M];
 	QUAD *quad;
 	FLOAT vol, det, area, diam;
 	const FLOAT *w, *p, *vu, *gu, *vT, *vT0, *normal;
@@ -272,6 +326,9 @@ phgNSBuildSolverTRHS(NSSolver *ns, BOOLEAN init_T)
 		vol = fabs(det / 6.);
 
 		FLOAT gT[Dim] = {0, 0, 0};
+		FLOAT eu[Dim*Dim];
+		MAT3_SYM(gu, eu);
+
 		for (i = 0; i < M; i++) {
 		    const FLOAT *ggi = phgQuadGetBasisGradient(e, T[1], i, quad) + q*Dim;
 		    int k;
@@ -297,21 +354,114 @@ phgNSBuildSolverTRHS(NSSolver *ns, BOOLEAN init_T)
 
 		    FLOAT conv = INNER_PRODUCT(vu, gT) * (*gi);
 		    FLOAT diff_T = INNER_PRODUCT(gT, ggi);
-		    FLOAT diff_u = MAT3_NORM2_2(gu) * (*gi);
+		    FLOAT diff_u = MAT3_NORM2_2(eu) * (*gi);
 		    
 		    const FLOAT rho = RHO_ICE;
 		    const FLOAT c = HEAT_CAPACITY;
 		    const FLOAT K = THEM_CONDUCT;
 		    const FLOAT a = SEC_PER_YEAR;
 		    //FLOAT q = HEAT_SOURCE;
+		    FLOAT strain_heat = 0;
+
+		    if (0) {
+			FLOAT ux, uy, uz, vx, vy, vz;
+	    
+			ux = gu[0] / LEN_SCALING; 
+			uy = gu[1] / LEN_SCALING; 
+			uz = gu[2] / LEN_SCALING;
+			vx = gu[3] / LEN_SCALING; 
+			vy = gu[4] / LEN_SCALING; 
+			vz = gu[5] / LEN_SCALING;
+
+			phgInfo(0, "   strain: %e %e %e\n", 
+				(.5*gu[2]*gu[2] + .5*gu[5]*gu[5]) * (*gi)  / LEN_SCALING2,
+				2* (ux*ux + vy*vy + ux*vy
+				    + 0.25 * pow(uy + vx, 2)
+				    + 0.25 * (uz*uz + vz*vz)) * (*gi),
+				MAT3_NORM2_2(eu) * (*gi) / LEN_SCALING2
+				);
+		    }
+
+		    /* Strain heat */
+		    if (ns_params->core_type == SIA) {
+
+#if 0
+#   warning SIA Strain heat: P1(Gu)
+			/* Strain heat, from P1(Gu)  */
+			strain_heat = nu * (.5*gu[2]*gu[2] + .5*gu[5]*gu[5]) * (*gi)  / LEN_SCALING2;
+#else
+#   warning SIA Strain heat: nabla u		
+			/* Strain heat, from nabla u
+			 * 
+			 * PHI = 2 * A(T) * (rho g (s-z))^{n+1} |\nabla s|^{n+1}
+			 *
+			 * Rutt et al.: GLIMMER Ice sheet model, P3-4
+			 * */
+
+			const FLOAT n = POWER_N;
+			const FLOAT a = SEC_PER_YEAR;
+			const FLOAT T0 = ARRHENIUS_T;
+			const FLOAT Q0 = ARRHENIUS_Q0;
+			const FLOAT a0 = ARRHENIUS_A0;
+			const FLOAT Q1 = ARRHENIUS_Q1;
+			const FLOAT a1 = ARRHENIUS_A1;
+			const FLOAT R  = GAS_CONSTANT;
+
+			const FLOAT *lambda = p;
+			FLOAT vT, vgS[2], vdepth, norm_gS, A;
+
+			phgDofEval(ns->T[1], e, lambda, &vT);
+			phgDofEval(ns->depth_P1, e, lambda, &vdepth);
+			phgDofEval(ns->dof_gradS, e, lambda, vgS); 
+			norm_gS = sqrt(vgS[0]*vgS[0] + vgS[1]*vgS[1]);
+
+			if (vT < T0)
+			    A = a0 * exp(-Q0 / R / vT);
+			else
+			    A = a1 * exp(-Q1 / R / vT);
+			A *= SEC_PER_YEAR;
+#       if CONST_A
+			A = 1e-16;
+#       endif
+			strain_heat = 2*A
+			    * pow(RHO_ICE * GRAVITY * (vdepth) * LEN_SCALING, n+1)
+			    * pow(norm_gS, n+1)
+			    * (*gi) / LEN_SCALING2;
+#endif
+
+		    } 
+		    else if (ns_params->core_type == FIRST_ORDER) {
+			FLOAT ux, uy, uz, vx, vy, vz;
+	    
+			ux = gu[0] / LEN_SCALING; 
+			uy = gu[1] / LEN_SCALING; 
+			uz = gu[2] / LEN_SCALING;
+			vx = gu[3] / LEN_SCALING; 
+			vy = gu[4] / LEN_SCALING; 
+			vz = gu[5] / LEN_SCALING;
+
+			strain_heat = nu * 2* (ux*ux + vy*vy + ux*vy
+					       + 0.25 * pow(uy + vx, 2)
+					       + 0.25 * (uz*uz + vz*vz)) * (*gi);
+		    } 
+		    else if (ns_params->core_type == STOKES) {
+			strain_heat = nu * MAT3_NORM2_2(eu) * (*gi) / LEN_SCALING2;
+		    } 
+		    else if (ns_params->core_type == DEBUG_CORE1) {
+			strain_heat = 0.;
+		    }
+		    else {
+			phgError(0, "Unknown core type!!!\n");
+		    }
 
 		    rhs[i] += vol*(*w) * (
 #if USE_TEMP_TIME
 					  rho * c * (*vT0)*(*gi) / dt[0]
 #endif
 #if USE_TEMP_HEAT
-					  + nu * MAT3_NORM2_2(gu) * (test_phi_i) / LEN_SCALING2
+					  //+ nu * MAT3_NORM2_2(gu) * (test_phi_i) / LEN_SCALING2
 					  //+ q * a
+					  + strain_heat
 #endif
 					  +0
 					  ) * EQU_T_SCALING;
@@ -370,15 +520,18 @@ phgNSBuildSolverTRHS(NSSolver *ns, BOOLEAN init_T)
 	}	  /* end of faces */
 
 	for (i = 0; i < M; i++) 
-	    if (phgDofDirichletBC_(ns->T[1], e, i, func_T, buf, rhs + i,
-				   DOF_PROJ_NONE)) 
+	    if (phgDofDirichletBC_(ns->T[1], e, i, func_T_wrapper, buf, rhs + i,
+				   DOF_PROJ_NONE)) {
 		;
+	    }
+
+
 
 	/* Map: Element -> system */
 	for (i = 0; i < M; i++)
-	    I[i] = phgMapE2L(ns->matT->cmap, 0, e, i);
+	    I_[i] = phgMapE2L(ns->matT->cmap, 0, e, i);
 
-	phgVecAddEntries(rhsT, 0, M, I, &rhs[0]);
+	phgVecAddEntries(rhsT, 0, M, I_, &rhs[0]);
     }				/* end element */
     phgVecAssemble(rhsT);
 
@@ -422,7 +575,7 @@ phgNSSolverTBuildConstrain(NSSolver *ns)
     if (ns->T[1]->type == DOF_P1)
 	dof_depth = ns->depth_P1;
     else 
-	dof_depth = ns->depth_P2;
+	dof_depth = ns->depth_T;
     INT dof_size = DofGetDataCount(dof_depth);
 
     FLOAT *vH = dof_depth->data;
@@ -593,10 +746,7 @@ phgNSSolverTSolve(NSSolver *ns, BOOLEAN init_T)
 	phgOptionsSetOptions("-solver gmres "
 			     "-solver_maxit 1000 "
 			     "-solver_rtol 1e-10");
-	phgOptionsSetOptions(_nsp->Stokes_opts);
-#if USE_PETSC
-	//PetscOptionsInsertFile(MPI_COMM_WORLD, "../options/petsc_asm.opts", PETSC_TRUE);
-#endif
+	phgOptionsSetOptions(_nsp->T_opts);
 	ns->solver_T = phgMat2Solver(SOLVER_DEFAULT, A_fix);
 	phgSolverAssemble(ns->solver_T);
 	phgOptionsPop();
@@ -666,7 +816,6 @@ phgNSSolverTSolve(NSSolver *ns, BOOLEAN init_T)
 
 
 	/* Output T_mask to check */
-#if 0
 	if (1) {
 	    char name[1000];
 	    sprintf(name, "Tmask_%03d.plt", niter);
@@ -678,16 +827,6 @@ phgNSSolverTSolve(NSSolver *ns, BOOLEAN init_T)
 	    phgExportTecplot(g, name, dof_mask, NULL);
 	    phgDofFree(&dof_mask);
 	}
-	char name[100];
-	sprintf(name, "Tmask_%05d.vtk", niter);
-	VEC *vec_mask = phgMapCreateVec(T_map, 1);
-
-	for (i = 0; i < nlocal; i++)
-	    vec_mask->data[i] = T_mask[i];
-	DOF *dof_mask = phgDofNew(g, DOF_P2, 1, "mask", DofNoAction);
-	phgMapLocalDataToDof(T_map, 1, &dof_mask, vec_mask->data);
-	phgExportTecplot(g, name, dof_mask);
-#endif
 
 	niter++;
     }
@@ -733,7 +872,8 @@ init_temp_diff(NSSolver *ns)
     //find_melt_region(ns);
     //phgDofCopy(T[1], &T[0], NULL, "T_{n}");
     
-    if (0) phgExportTecplot(g, OUTPUT_DIR "Temp_init.plt", T[1], NULL);
+    if (0)
+		phgExportVTK(g, OUTPUT_DIR "Temp_init.vtk", T[1], NULL);
 }
 
 
@@ -746,49 +886,11 @@ static void
 init_temp_interp(NSSolver *ns) 
 {
     GRID *g = ns->g;
-    DOF **T = ns->T, *T_P1, *Beta = ns->beta;
+    DOF **T = ns->T, *T_P1;
     LAYERED_MESH *gL = ns->gL;
     int i, j, ii, iG, nly = gL->max_nlayer;
+    BTYPE btype = T[1]->DB_mask;
     FILE *fp;
-
-    /* Beta */
-    {
-	phgPrintf("\n   ==================\n");
-	phgPrintf("   Beta, from 2D data\n");
-	phgPrintf("   ==================\n\n");
-
-	FLOAT *data;
-	data = phgCalloc(gL->nvert, sizeof(*data));
-
-	//fp = fopen("./beta.txt", "r");
-	assert(Beta->type == DOF_P1);
-
-	for (i = 0; i < gL->nvert; i++)
-        data[i] = 1e9;
-	  //  fscanf(fp, "%lf", data + i);
-
-	for (ii = 0; ii < gL->nvert_bot; ii++) {
-	    i = gL->vert_bot_Lidx[ii];
-	    assert(gL->vert_local_lists[i] != NULL);
-
-	    iG = gL->vert_bot_Gidx[ii];
-	    assert(iG < gL->nvert);
-
-	    int nv = gL->vert_local_lists[i][0];
-	    int *iL = &gL->vert_local_lists[i][1];
-	    
-	    assert(nv > 0);
-
-	    for (j = 0; j < nv; j++) {
-		*DofVertexData(Beta, iL[j]) = data[iG] * 1e3;
-	    }
-	}
-	DOF_SCALE(ns->beta, "interp");
-	//fclose(fp);
-
-	//phgExportTecplot(g, "beta_interp.plt", Beta, NULL);
-	phgFree(data);
-    }
 
     phgPrintf("\n   ==================\n");
     phgPrintf("   Temperature init interp, from top\n");
@@ -796,6 +898,7 @@ init_temp_interp(NSSolver *ns)
     phgPrintf("   T type: %s\n", T[1]->type->name);
 
     T_P1 = phgDofNew(g, DOF_P1, 1, "temp P1", func_T);
+    
     for (ii = 0; ii < gL->nvert_bot; ii++) {
 	i = gL->vert_bot_Lidx[ii];
 	assert(gL->vert_local_lists[i] != NULL);
@@ -807,10 +910,13 @@ init_temp_interp(NSSolver *ns)
 	int *iL = &gL->vert_local_lists[i][1];
 	assert(nv > 0);
 
-	/* interp from top to bottom */
+	/* interp from top to bottom,
+	 *   top: surface temp observed
+	 *   bot: melting point
+	 * */
 	FLOAT Tn = *DofVertexData(T_P1, iL[nv-1]);
 	FLOAT T0 = TEMP_WATER;
-	FLOAT dT = (Tn - T0) / nv;
+	FLOAT dT = (Tn - T0) / (nv - 1);
 
 	for (j = 0; j < nv; j++) {
 	    *DofVertexData(T_P1, iL[j])
@@ -820,8 +926,9 @@ init_temp_interp(NSSolver *ns)
 
     /* interp */
     phgDofCopy(T_P1, &T[1], NULL, "T_{n+1}");
+    T[1]->DB_mask = btype;	/* restore */
     //phgDofGradient(T[1], &ns->gradT[1], NULL, "gradT_{n+1}");
-    //phgExportTecplot(g, "init_T_interp.plt", T[1], NULL);
+    phgExportTecplot(g, "init_T_interp.plt", T[1], NULL);
     
     phgDofFree(&T_P1);
     DOF_SCALE(ns->T[1], "interp");
@@ -840,50 +947,10 @@ static void
 init_temp_data(NSSolver *ns) 
 {
     GRID *g = ns->g;
-    DOF **T = ns->T, *T_P1, *Beta = ns->beta;
+    DOF **T = ns->T, *T_P1;
     LAYERED_MESH *gL = ns->gL;
     int i, j, ii, iG, nly = gL->max_nlayer;
     FILE *fp;
-
-    /* Beta */
-    {
-	phgPrintf("\n   ==================\n");
-	phgPrintf("   Beta, from 2D data\n");
-	phgPrintf("   ==================\n\n");
-
-	FLOAT *data;
-	data = phgCalloc(gL->nvert, sizeof(*data));
-
-	//fp = fopen("./beta.txt", "r");
-	assert(Beta->type == DOF_P1);
-
-	//for (i = 0; i < gL->nvert; i++)
-	//    fscanf(fp, "%lf", data + i);
-	for (i=0; i<gL->nvert;i++)
-	  data[i]=0.001;
-	for (ii = 0; ii < gL->nvert_bot; ii++) {
-	    i = gL->vert_bot_Lidx[ii];
-	    assert(gL->vert_local_lists[i] != NULL);
-
-	    iG = gL->vert_bot_Gidx[ii];
-	    assert(iG < gL->nvert);
-
-	    int nv = gL->vert_local_lists[i][0];
-	    int *iL = &gL->vert_local_lists[i][1];
-	    
-	    assert(nv > 0);
-
-	    for (j = 0; j < nv; j++) {
-		*DofVertexData(Beta, iL[j]) = data[iG] * 1e3;
-	    }
-	}
-	DOF_SCALE(ns->beta, "interp");
-	//fclose(fp);
-
-	phgExportTecplot(g, "beta_interp.plt", Beta, NULL);
-	phgFree(data);
-    }
-    
 
     /* Temp */
     if (0) {
@@ -897,13 +964,11 @@ init_temp_data(NSSolver *ns)
 
 	T_P1 = phgDofNew(g, DOF_P1, 1, "temp P1", DofNoAction);
     
-	//fp = fopen("./temperature.txt", "r");
-	assert(Beta->type == DOF_P1);
+	fp = fopen("./temperature.txt", "r");
 
 	for (j = 0; j < nly + 1; j++)
 	    for (i = 0; i < gL->nvert; i++)
-            data[j*gL->nvert+i]=263.15;
-		//fscanf(fp, "%lf", data + j*gL->nvert + i);
+		fscanf(fp, "%lf", data + j*gL->nvert + i);
 
 	for (ii = 0; ii < gL->nvert_bot; ii++) {
 	    i = gL->vert_bot_Lidx[ii];
@@ -942,7 +1007,7 @@ init_temp_data(NSSolver *ns)
     
 	phgDofFree(&T_P1);
 	DOF_SCALE(ns->T[1], "interp");
-	//fclose(fp);
+	fclose(fp);
     }
 
 
@@ -990,43 +1055,49 @@ find_melt_region(NSSolver *ns)
     DOF *melt = NULL;
     int i, s, n;
     FLOAT Area = 0.;
-    FLOAT *vH = ns->depth_P2->data, *vM;
+    FLOAT *vH = ns->depth_T->data, *vM;
 
-    ERROR_MSG("Disable melt region.");
-    assert(ns->depth_P2->type == ns->T[1]->type); 
-    melt = phgDofNew(g, DOF_P2, 1, "melt mark", DofNoAction);
+    //ERROR_MSG("Disable melt region.");
+    assert(ns->depth_T->type == ns->T[1]->type); 
+    melt = phgDofNew(g, ns->T[1]->type, 1, "melt mark", DofNoAction);
     n = DofGetDataCount(melt);
     vM = melt->data;
     for (i = 0; i < n; i++, vH++, vM++) {
-   	*vM = TEMP_WATER - BETA_MELT * (*vH) * LEN_SCALING;
-    } 
+		*vM = TEMP_WATER - BETA_MELT * (*vH) * LEN_SCALING;
+    }
+    //phgDofDump(ns->depth_T); 
+    //phgDofDump(melt); 
+    //phgDofDump(T); 
     phgDofAXPBY(-1., T, 1, &melt);
-    if (0) phgExportVTK(g, "melt.vtk", melt, NULL);
+    if (ns_params->output_melt)
+		phgExportVTK(g, "output/melt.vtk", melt, NULL);
 
     ForAllElements(g, e) {
-	int v0, v1, v2;
-	FLOAT area, vmark, lambda[Dim+1];
+		int v0, v1, v2;
+		FLOAT area, vmark, lambda[Dim+1];
 
-	e->mark = 0;
-	for (s = 0; s < NFace; s++) {
-	    if (e->bound_type[s] & BC_BOTTOM) {
-		v0 = GetFaceVertex(s, 0);
-		v1 = GetFaceVertex(s, 1);
-		v2 = GetFaceVertex(s, 2);
-		lambda[v0] = 1./3.;
-		lambda[v1] = 1./3.;
-		lambda[v2] = 1./3.;
-		lambda[s] = 0.;
+		e->mark = 0;
+		for (s = 0; s < NFace; s++) {
+			if (e->bound_type[s] & BC_BOTTOM) {
+				v0 = GetFaceVertex(s, 0);
+				v1 = GetFaceVertex(s, 1);
+				v2 = GetFaceVertex(s, 2);
+				lambda[v0] = 1./3.;
+				lambda[v1] = 1./3.;
+				lambda[v2] = 1./3.;
+				lambda[s] = 0.;
 		    
-		phgDofEval(melt, e, lambda, &vmark);
-		if (vmark < 1e-3) { /* fixed */
-		    area = phgGeomGetFaceArea(g, e, s);
-		    Area += area;
-		    e->mark = 1;
+				phgDofEval(melt, e, lambda, &vmark);
+				phgInfo(0, "vmark %e\n", vmark);
+				if (vmark < 1e-3) { /* fixed */
+					area = phgGeomGetFaceArea(g, e, s);
+					Area += area;
+					e->mark = 1;
+				}
+			}
 		}
-	    }
-	}
     }
+    phgInfo(0, "   Local melting regain: %e\n", Area);
 
     FLOAT tmp = Area;
     MPI_Allreduce(&tmp, &Area, 1, MPI_DOUBLE, MPI_SUM, g->comm);
@@ -1064,119 +1135,255 @@ find_melt_region(NSSolver *ns)
     
 
 void
-proj_gradu(NSSolver *ns, DOF *gradu)
+proj_gradu(NSSolver *ns, DOF *gradu,
+	   const BYTE *components, int type)
 {
     GRID *g = ns->g;
     SIMPLEX *e;
     int i, j, k, q;
     DOF *Gradu, *Gradu0;
     SOLVER *solver_Gu;
-    
-    /* L2 projection of gradu */
-    Gradu = phgDofNew(g, DOF_P1, DDim, "Gradu", DofNoAction);
-    Gradu0 = phgDofNew(g, DOF_P1, 1, "Gradu", DofNoAction);
+    const BYTE all_components[DDim] = {1, 1, 1,
+				       1, 1, 1,
+				       1, 1, 1};
+    if (components == NULL)
+	components = all_components;
 
-    /* solver_Gu */
-    phgOptionsPush();
-    phgOptionsSetOptions("-solver gmres "
-			 "-solver_maxit 100 "
-			 "-solver_rtol 1e-10");
-#if USE_PETSC
-   // PetscOptionsInsertFile(MPI_COMM_WORLD, "../options/petsc_cg.opts", PETSC_TRUE); 
-#endif
-    //phgOptionsSetOptions(Gu_opts);
-    solver_Gu = phgSolverCreate(SOLVER_DEFAULT, Gradu0, NULL);
-    solver_Gu->verb = 0;
-    phgOptionsPop();
 
-    VEC *vec[DDim];
-    for (k = 0; k < DDim; k++) {
-	vec[k] = phgMapCreateVec(solver_Gu->rhs->map, 1) ;
-	phgVecDisassemble(vec[k]);
-    }
+    if (type == 0) {
+	/* ------------------------------------------------------------
+	 *
+	 *
+	 * Proj gradu by L2
+	 *
+	 *
+	 * ------------------------------------------------------------ */
 
-    /* Build linear system */
-    ForAllElements(g, e) {
-	int M = Gradu0->type->nbas;	/* num of bases of Velocity */
-	int order = DofTypeOrder(Gradu0, e) * 2;
-	FLOAT A[M][M], rhs[DDim][M];
-	INT I[M];
-	QUAD *quad;
-	FLOAT vol, det;
-	const FLOAT *w, *p, *gu;
+	/* L2 projection of gradu */
+	Gradu = phgDofNew(g, DOF_P1, DDim, "Gradu", DofNoAction);
+	Gradu0 = phgDofNew(g, DOF_P1, 1, "Gradu", DofNoAction);
 
-	Bzero(A); Bzero(rhs);
-	quad = phgQuadGetQuad3D(order);
-	gu = phgQuadGetDofValues(e, gradu, quad); 
+	/* solver_Gu */
+	phgOptionsPush();
+	phgOptionsSetOptions(ns_params->proj_opts);
+	solver_Gu = phgSolverCreate(SOLVER_DEFAULT, Gradu0, NULL);
+	solver_Gu->verb = 0;
+	phgOptionsPop();
 
-	p = quad->points;
-	w = quad->weights;
-	for (q = 0; q < quad->npoints; q++) {
-	    phgGeomGetCurvedJacobianAtLambda(g, e, p, &det);
-	    vol = fabs(det / 6.);
-
-	    for (i = 0; i < M; i++) {
-		const FLOAT *gi = phgQuadGetBasisValues(e, Gradu0, i, quad) + q;    
-		for (j = 0; j < M; j++) {
-		    const FLOAT *gj = phgQuadGetBasisValues(e, Gradu0, j, quad) + q;       
-		    FLOAT qmass = vol*(*w) * (*gj) * (*gi);
-			A[i][j] += qmass;
-		}
-		    
-		for (k = 0; k < DDim; k++)
-		    rhs[k][i] += vol*(*w) * gu[k] * (*gi); 
+	VEC *vec[DDim];
+	for (k = 0; k < DDim; k++) {
+	    if (components[k]) {
+		vec[k] = phgMapCreateVec(solver_Gu->rhs->map, 1) ;
+		phgVecDisassemble(vec[k]);
 	    }
-	    gu += DDim;
-	    w++; p += Dim + 1;
 	}
 
-	/* Map: Element -> system */
-	for (i = 0; i < M; i++)
-	    I[i] = phgMapE2L(solver_Gu->mat->cmap, 0, e, i);
+	/* Build linear system */
+	if (0) {
+	    /* Removed */
+	    /* ns_params->utype == DOF_P1 */
+	    /* && ns_params->use_prism_elem) { */
+	    /* buildProjGuPrism(ns, solver_Gu, &vec[0], components); */
+	}
+	else {
+	    ForAllElements(g, e) {
+		int M = Gradu0->type->nbas;	/* num of bases of Velocity */
+		int order = DofTypeOrder(Gradu0, e) * 2;
+		FLOAT A[M][M], rhs[DDim][M];
+		INT I_[M];
+		QUAD *quad;
+		FLOAT vol, det;
+		const FLOAT *w, *p, *gu;
 
-	/* Global res */
-	for (i = 0; i < M; i++)
-	    phgMatAddEntries(solver_Gu->mat, 1, I + i, M, I,
-			     &(A[i][0])); 
+		Bzero(A); Bzero(rhs);
+		quad = phgQuadGetQuad3D(order);
+		gu = phgQuadGetDofValues(e, gradu, quad); 
 
-	for (k = 0; k < DDim; k++)
-	    phgVecAddEntries(vec[k], 0, M, I, &rhs[k][0]);
-    }				/* end element */
+		p = quad->points;
+		w = quad->weights;
+		for (q = 0; q < quad->npoints; q++) {
+		    phgGeomGetCurvedJacobianAtLambda(g, e, p, &det);
+		    vol = fabs(det / 6.);
+
+		    for (i = 0; i < M; i++) {
+			const FLOAT *gi = phgQuadGetBasisValues(e, Gradu0, i, quad) + q;    
+			for (j = 0; j < M; j++) {
+			    const FLOAT *gj = phgQuadGetBasisValues(e, Gradu0, j, quad) + q;       
+			    FLOAT qmass = vol*(*w) * (*gj) * (*gi);
+			    A[i][j] += qmass;
+			}
+		    
+			for (k = 0; k < DDim; k++) {
+			    if (components[k]) {
+				rhs[k][i] += vol*(*w) * gu[k] * (*gi); 
+			    }
+			}
+		    }
+		    gu += DDim;
+		    w++; p += Dim + 1;
+		}
+
+		/* Map: Element -> system */
+		for (i = 0; i < M; i++)
+		    I_[i] = phgMapE2L(solver_Gu->mat->cmap, 0, e, i);
+
+		/* Global res */
+		for (i = 0; i < M; i++)
+		    phgMatAddEntries(solver_Gu->mat, 1, I_ + i, M, I_,
+				     &(A[i][0])); 
+
+		for (k = 0; k < DDim; k++)
+		    if (components[k]) 
+			phgVecAddEntries(vec[k], 0, M, I_, &rhs[k][0]);
+	    }/* end element */
+	}
+	
     
 
-    for (k = 0; k < DDim; k++)
-	phgVecAssemble(vec[k]);
-    solver_Gu->rhs_updated = TRUE;
+	for (k = 0; k < DDim; k++)
+	    if (components[k]) 
+		phgVecAssemble(vec[k]);
+	solver_Gu->rhs_updated = TRUE;
 
-    INT n = DofGetDataCount(Gradu0);
-    for (k = 0; k < DDim; k++) {
-	phgVecCopy(vec[k], &solver_Gu->rhs);
-	phgDofSetDataByValue(Gradu0, 0.);
-	phgSolverSolve(solver_Gu, FALSE, Gradu0, NULL);
-	phgPrintf("      solver_Gu: nits = %d, resid = %0.4lg ",
-		  solver_Gu->nits, solver_Gu->residual);
-	elapsed_time(g, TRUE, phgPerfGetMflops(g, NULL, NULL));
+	INT n = DofGetDataCount(Gradu0);
+	for (k = 0; k < DDim; k++) {
+	    if (components[k]) {
+		phgVecCopy(vec[k], &solver_Gu->rhs);
+		phgDofSetDataByValue(Gradu0, 0.);
+		phgSolverSolve(solver_Gu, FALSE, Gradu0, NULL);
+		phgPrintf("      solver_Gu: nits = %d, resid = %0.4lg ",
+			  solver_Gu->nits, solver_Gu->residual);
+		elapsed_time(g, TRUE, phgPerfGetMflops(g, NULL, NULL));
 
-	FLOAT *vg = Gradu->data, *vg0 = Gradu0->data;
-	for (i = 0; i < n; i++, vg0++, vg += DDim)
-	    vg[k] = *vg0;
+		FLOAT *vg = Gradu->data, *vg0 = Gradu0->data;
+		for (i = 0; i < n; i++, vg0++, vg += DDim)
+		    vg[k] = *vg0;
+	    }
+	}
+
+	if (DUMP_MAT_VEC) {
+	    phgPrintf("Dumping MatGu, rhsGu\n");
+	    phgMatDumpMATLAB(solver_Gu->mat, "A_gu", "mat_gu_.m");
+	    phgVecDumpMATLAB(solver_Gu->rhs, "b_gu", "rhs_gu_.m");
+	}
+
+	phgInfo(2, "   Destroy solver Gu\n");
+	for (k = 0; k < DDim; k++)
+	    if (components[k]) 
+		phgVecDestroy(&vec[k]);
+	phgSolverDestroy(&solver_Gu);
+	phgDofFree(&Gradu0);
+
+	phgExportTecplot(g, "gradu0.plt", Gradu, NULL);
+    } 
+    else {
+	/* ------------------------------------------------------------
+	 *
+	 *
+	 * Proj gradu by average
+	 *
+	 *
+	 * ------------------------------------------------------------ */
+	Gradu = phgDofNew(g, DOF_P1, DDim, "Gradu", DofNoAction);
+	DOF *scale = phgDofNew(g, DOF_P1, 1, "scale", DofNoAction);
+	phgDofSetDataByValue(scale, 0.);
+
+	MAP *map0 = phgMapCreate(scale, NULL);
+	VEC *vec0 = phgMapCreateVec(map0, 1);
+
+	VEC *vec[DDim];
+	phgVecDisassemble(vec0);
+	for (k = 0; k < DDim; k++) {
+	    if (components[k]) {
+		vec[k] = phgMapCreateVec(map0, 1) ;
+		phgVecDisassemble(vec[k]);
+	    }
+	}
+    
+	ForAllElements(g, e) {
+	    int M = scale->type->nbas;	/* num of bases of Velocity */	
+	    INT I_[M];
+	    FLOAT a[M], rhs[DDim][M], vol, gu[DDim];
+	    const FLOAT lambda0[4] = {.25, .25, .25, .25};
+
+#if 1	
+	    vol = phgGeomGetVolume(g, e);
+#else
+	    vol = 1.; 
+#endif
+
+	    Bzero(a); Bzero(rhs);
+	    for (i = 0; i < M; i++) {
+		a[i] += vol;		/* scale */
+
+		phgDofEval(gradu, e, lambda0, gu);
+		for (k = 0; k < DDim; k++) {
+		    if (components[k]) {
+			rhs[k][i] += vol * gu[k];
+		    }
+		}
+	    }
+
+	    for (i = 0; i < M; i++) 
+		I_[i] = phgMapE2L(map0, 0, e, i);
+
+	    phgVecAddEntries(vec0, 0, M, I_, &a[0]);
+	    for (k = 0; k < DDim; k++)
+		if (components[k]) 
+		    phgVecAddEntries(vec[k], 0, M, I_, &rhs[k][0]);
+	}
+
+	/* assemble */
+	phgVecAssemble(vec0);
+	for (k = 0; k < DDim; k++)
+	    if (components[k]) 
+		phgVecAssemble(vec[k]);
+
+	/* average */
+	for (k = 0; k < DDim; k++)
+	    if (components[k]) {
+		const FLOAT *s = vec0->data;
+		FLOAT *v = vec[k]->data;
+
+		for (i = 0; i < map0->nlocal; i++) {
+		    v[i] /= s[i];
+		}
+	    }
+
+	/* assign dofs */
+	for (k = 0; k < DDim; k++)
+	    if (components[k]) {
+		phgMapLocalDataToDof(map0, 1, &scale, vec[k]->data);
+		FLOAT *v0 = scale->data;
+		FLOAT *v = Gradu->data;
+
+		for (i = 0; i < g->nvert; i++) {
+		    v[k] = *v0;
+
+		    v0++;
+		    v += DDim;
+		}
+	    }    
+    
+
+	phgVecDestroy(&vec0);
+	for (k = 0; k < DDim; k++)
+	    if (components[k]) 
+		phgVecDestroy(&vec[k]);
+	phgMapDestroy(&map0);
+	phgDofFree(&scale);
+
+	phgExportTecplot(g, "gradu1.plt", Gradu, NULL);
     }
 
-    if (DUMP_MAT_VEC) {
-	phgPrintf("Dumping MatGu, rhsGu\n");
-	phgMatDumpMATLAB(solver_Gu->mat, "A_gu", "mat_gu_.m");
-	phgVecDumpMATLAB(solver_Gu->rhs, "b_gu", "rhs_gu_.m");
-    }
 
-    phgInfo(2, "   Destroy solver Gu\n");
-    for (k = 0; k < DDim; k++)
-	phgVecDestroy(&vec[k]);
-    phgSolverDestroy(&solver_Gu);
 
-    phgDofFree(&Gradu0);
-
+    if (ns->Gradu == NULL)
+	ns->Gradu = Gradu;
+    else {
 	phgDofCopy(Gradu, &ns->Gradu, NULL, "Gradu");
 	phgDofFree(&Gradu);
+    }
 }
 
 

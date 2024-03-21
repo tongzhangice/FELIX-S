@@ -6,6 +6,8 @@
 #include <math.h>
 #include <stdarg.h>
 
+//#include "oct-search.h"
+
 #if USE_MG 
 #  include "multi-grid.h"
 #endif /* USE_MG */
@@ -26,8 +28,9 @@
  *  */
 
 /* Control Macros */
-#define STEADY_STATE 1		/* Steaty or time-dependent */
-#define TIME_DEP_NON 0          /* Time-dependent case, using non-linear solver  */
+#  define STEADY_STATE 0	  /* Steaty or time-dependent */
+#  define TIME_DEP_NON 1          /* Time-dependent case, using non-linear solver  */
+
 
 /* Grid */
 #define USE_ISOP 0		/* Iso-parametric elements */
@@ -36,7 +39,7 @@
 #define PIN_AT_ROOT 0			/* Pin node options */
 
 /* Linear solver */
-#define USE_QP_ONLY 1			/* Use Qp in PCD precondtioner */
+#define USE_QP_ONLY 0			/* Use Qp in PCD precondtioner */
 #define REUSE_MAT 0                     /* Reuse matrix, if matrix is fixed for each time step */
 #define MAT_HANDLE_BDRY_EQNS FALSE
 #ifndef DUMP_MAT_VEC			/* Dump mat vec for debug */
@@ -45,12 +48,9 @@
 
 
 /* Sliding B.C. */
-#define USE_NODAL_LOADS 1
-#define USE_SLIDING_BC 0
-#define CASE_DRAINAGE_BASIN 0
+#define USE_SLIDING_BC  1	        /* Use sliding boundary condition */
 #define ZERO_TRACT_ZONE 0
-#define SLIP_BDRY BC_BOTTOM
-//#define SLIP_BDRY BC_BOTTOM2
+#define BC_BOTTOM (SLIP_BDRY | BC_FLOAT)
 
 
 /* Temp solver */
@@ -71,128 +71,22 @@
 #define MG_SOLVER_Ap 1
 #define MG_SOLVER_Qp 2
 
+#define PC_MAX_LEVEL 10
 
-/*
- * ================================================================================
- * 
- *                 Test problem
- * 
- * ================================================================================
- * */
-#define DRIVEN_CAVITY 100
-#define CYLINDER 101
-#define KOVASZNAY 109
-#define ICE_BENCH_A 102
-#define ICE_BENCH_B 103
-#define ICE_BENCH_C 104
-#define ICE_BENCH_D 105
-#define ICE_BENCH_E 106
-#define ICE_BENCH_F 107
-#define ESIMINT_A 112
-#define ESIMINT_B 113
-#define ESIMINT_C 114
-#define ESIMINT_D 115
-#define ESIMINT_E 116
-#define ESIMINT_F 117
-#define ESIMINT_G 118
-#define ESIMINT_H 119
-#define HEINO_A 122
-#define HEINO_B 123
-#define HEINO_C 124
-#define HEINO_D 125
-#define HEINO_E 126
-#define HEINO_F 127
-#define ICE_EXACT      130
-#define ICE_GREEN_LAND 200
-#define TEST 201
-
-#define TEST_CASE TEST
-#define NS_PROBLEM "test"
-
-
-/* Bench test */
-#define ICE_BENCH_TEST 0
-#define ESIMINT_TEST 0
-#define HEINO_TEST 0
-
-#if TEST_CASE == ICE_BENCH_A \
-    || TEST_CASE == ICE_BENCH_B \
-    || TEST_CASE == ICE_BENCH_C \
-    || TEST_CASE == ICE_BENCH_D \
-    || TEST_CASE == ICE_BENCH_E \
-    || TEST_CASE == ICE_BENCH_F
-#  undef ICE_BENCH_TEST
-#  define ICE_BENCH_TEST 1
-#elif TEST_CASE == ESIMINT_A \
-    || TEST_CASE == ESIMINT_B \
-    || TEST_CASE == ESIMINT_C \
-    || TEST_CASE == ESIMINT_D \
-    || TEST_CASE == ESIMINT_F \
-    || TEST_CASE == ESIMINT_G \
-    || TEST_CASE == ESIMINT_H
-#  undef ESIMINT_TEST
-#  define ESIMINT_TEST 1
-#elif TEST_CASE == HEINO_A \
-    || TEST_CASE == HEINO_B \
-    || TEST_CASE == HEINO_C \
-    || TEST_CASE == HEINO_D \
-    || TEST_CASE == HEINO_E \
-    || TEST_CASE == HEINO_F
-#  undef HEINO_TEST
-#  define HEINO_TEST 1
-#endif
-
-
+#define NS_PROBLEM "ice"
 
 
 /* Scaling */
-#if ICE_BENCH_TEST
 #  define EQU_SCALING 1e-8
 #  define LEN_SCALING 1e3
 #  define PRES_SCALING 1e5
 #  define EQU_T_SCALING 1e0
-#elif ESIMINT_TEST
-#  define EQU_SCALING 1e-8
-#  define LEN_SCALING 1e3
-#  define PRES_SCALING 1e5
-#  define EQU_T_SCALING 1e-5
-#elif HEINO_TEST
-#  define EQU_SCALING 1e-8
-#  define LEN_SCALING 1e3
-#  define PRES_SCALING 1e5
-#  define EQU_T_SCALING 1
-#elif TEST_CASE == ICE_GREEN_LAND
-#  define EQU_SCALING 1
-#  define LEN_SCALING 1
-#  define PRES_SCALING 1
-#  define EQU_T_SCALING 1e12
-#elif TEST_CASE == LAS
-#  define EQU_SCALING 1e-5
-#  define LEN_SCALING 1
-#  define PRES_SCALING 1e5
-#  define EQU_T_SCALING 1e12
-#elif TEST_CASE == TEST
-#  define EQU_SCALING 1e-5
-#  define LEN_SCALING 1
-#  define PRES_SCALING 1e5
-#  define EQU_T_SCALING 1e12
-#elif TEST_CASE == ICE_EXACT
-#  define EQU_SCALING 1e-8
-#  define LEN_SCALING 1e3
-#  define PRES_SCALING 1e5
-#  define EQU_T_SCALING 1e0
-#else
-#  define EQU_SCALING 1
-#  define LEN_SCALING 1
-#  define PRES_SCALING 1
-#endif
-
 #  define LEN_SCALING2 (LEN_SCALING * LEN_SCALING)
 #  define LEN_SCALING3 (LEN_SCALING * LEN_SCALING * LEN_SCALING)
 
 /* Const parameters */
 #include "parameters.h"
-#include "netcdf-utils.h"
+#include "phg/netcdf-utils.h"
 
 
 /*
@@ -203,24 +97,27 @@
  * ================================================================================
  * */
 
+//#warning ----- FIXME on DOF_G1 -------
+#define DOF_G1 DOF_P8
 
 /* Bdry type */
 #define BC_TOP       (BDRY_USER1)
-#define BC_BOTTOM    (BDRY_USER3)
-#define BC_BOTTOM_GRD    (BDRY_USER8)
-#define BC_ISHELF    (BDRY_USER7)
-#define BC_LATERL    (BDRY_USER5)
-#define BC_LATERL_GRD    (BDRY_USER9)
-#define SETFLOW      (BC_BOTTOM)
-#define BC_DIVIDE    (BDRY_USER2)
-#define BC_TERMNS    (BDRY_USER4)
+#define SLIP_BDRY    (BDRY_USER2)
+#define BC_FLOAT     (BDRY_USER3)
+#define BC_LATERAL   (BDRY_USER4)
+#define BC_DIVIDE    (BDRY_USER5)
+#define BC_FRONT     (BDRY_USER6)
+#define BC_PIN_NODE  (BDRY_USER7)
+#define BC_INACTIVE  (BDRY_USER8)
 
-#define INFLOW  BC_BOTTOM
-#define OUTFLOW BC_TOP
+#define SETFLOW      (BC_BOTTOM | BC_LATERAL)
 
-#define PINNEDNODE   (BDRY_USER6)
+/* #define INFLOW  BC_BOTTOM */
+/* #define OUTFLOW BC_TOP */
+//#define PINNEDNODE   (BDRY_USER6)
 
 typedef enum { PICARD, NEWTON } LTYPE;	/* linearization type */
+typedef enum { STOKES, SIA, SSA, FIRST_ORDER, DEBUG_CORE1, DEBUG_CORE2} CORE_TYPE;	/* linearization type */
 
 /*
  * ================================================================================
@@ -230,15 +127,32 @@ typedef enum { PICARD, NEWTON } LTYPE;	/* linearization type */
  * ================================================================================
  * */
 
+typedef struct NSSolver_ NSSolver;
+
+
 /* Parameters */
 typedef struct NSParams_ {
+    int core_type;	 /* Ice sheet core type */
+
     DOF_TYPE *utype;             /* DOF type for velocity */
     DOF_TYPE *ptype;		  /* DOF type for pressure */
     DOF_TYPE *T_type;           /* DOF type for Temperature */
     char *utype_name;		  /* DOF type name for velocity */
     char *ptype_name;		  /* DOF type name for pressure */
     char *T_type_name;	          /* DOF type name for coordinates */
+
+    DOF_TYPE *mapping_type;           /* DOF type for Isop mapping */
+    char *isop_type_name;
+    //char *test_name;
+
+    DOF_TYPE *utype_prv;             /* DOF type for velocity */
+    DOF_TYPE *ptype_prv;		  /* DOF type for pressure */
+    DOF_TYPE *T_type_prv;           /* DOF type for Temperature */
+    char *utype_prv_name;		  /* DOF type name for velocity */
+    char *ptype_prv_name;		  /* DOF type name for pressure */
+    char *T_type_prv_name;	          /* DOF type name for coordinates */
     
+    BOOLEAN reduce_mesh;	  /* Reduce mesh where h = 0 */
     BOOLEAN layered_mesh;	  /* Use layered mesh */
     BOOLEAN struct_mesh;	  /* Use struct mesh */
     BOOLEAN solve_temp;	          /* Solve temperature */
@@ -252,10 +166,11 @@ typedef struct NSParams_ {
     BOOLEAN curved_refine;	  /* Use curved refinement */
     BOOLEAN start_const_vis;	  /* Viscosity start at constant */
     BOOLEAN compensate_equ;	  /* Compensate euqations */
-    BOOLEAN add_ice_shelf;	  /* add ice shelf part */
-    int Nx, Ny, Nz;		  /* Structured mesh size */
+    
+    //int Nx, Ny, Nz;		  /* Structured mesh size */
 
     INT periodicity;		  /* periodicity */
+    INT period_repeat;		  /* periodical repeat */
     FLOAT Re;			  /* Reynolds num */
     FLOAT nu;			  /* Viscosity */
     FLOAT time_start;		  /* Time start */
@@ -263,8 +178,6 @@ typedef struct NSParams_ {
     FLOAT dt0;			  /* Inintial dt */
     FLOAT eps_diagP;		  /* Diagnal entries for pressure matrix */
     FLOAT fp_scale;		  /* Dirichlet scale for Fp */
-
-    INT slip_condition;
 
     /* Discrete scheme */
     INT height_scheme;		  /* Height solver scheme */
@@ -274,7 +187,40 @@ typedef struct NSParams_ {
 				   *   default: True */
     int init_temp_type;		  /* Init temperature field
 				   * 0: diff, 1: interp, 2: read data */
+    BOOLEAN use_prism_elem;	  /* Use prism elems */
 
+    int stab_scheme;		  /* Pressure stab scheme
+				   * -1: none,
+				   * 0: Proj,
+				   * 1: Grad, P=\int x_i x_j
+				   * 2: Grad, P=(dhx^2, dhz^2)
+				   * */
+    BOOLEAN use_slide;		
+    int sliding_bdry_scheme; 	  /* 0: Dirich
+				   * 1: Lagrangian Multiplier
+				   * 2: Penalty
+				   *  */
+    FLOAT sliding_penalty;
+
+    FLOAT stab_nu;		  /* Pressure stab, negtive means nonlinear */
+    FLOAT stab_alpha;		  /* Pressure stab alpha */
+    int stab_remove_static;	  /* Remove Pressure stab hydro static pressure
+				   *   0: not removed, defult 
+				   *   1: solve p, with ((p - ps) - \Pi (p - p))
+				   *   2: solve p' = p - p_static (P1)
+				   *   3: solve p' = p - p_static (P2)
+				   *
+				   * */
+    FLOAT   dhx;		  /* dh x */
+    FLOAT   dhz;		  /* dh z */
+    int     temp_viscosity;       /* viscosity relates temperate type:
+				   *   0: const A
+				   *   1: T = -10
+				   *   2: use T
+				   * */
+    FLOAT constant_A;
+
+    
 #if USE_MG 
     BOOLEAN use_mg_F;		  /* Use Multigrid solver */
     BOOLEAN use_mg_Ap;		  /* Use Multigrid solver */
@@ -285,7 +231,7 @@ typedef struct NSParams_ {
     BOOLEAN use_Zp;		  /* Use Zp in the preconditioner, default: True */
     BOOLEAN implicit_convect;     /* Implicit scheme for convetion term,
 				   *   default True */
-    BOOLEAN use_symetric;	  /* Mat and PC is symetric, for symetric check */
+    //BOOLEAN use_symetric;	  /* Mat and PC is symetric, for symetric check */
 
     /* Faster code */
     BOOLEAN extern_force;	  /* Extern force, default ture! */
@@ -306,111 +252,84 @@ typedef struct NSParams_ {
     INT newton_start;		  /* Newton start step */
     INT newton_start0;		  /* Newton start step for first step,
 				   * negtive means using max_nonstep instead. */
-    FLOAT u_tol0;
-    FLOAT p_tol0;
-    FLOAT u_tol;
-    FLOAT p_tol;
-    FLOAT s_tol;
-
     INT step_span;		  /* Step span to output geo file */
-    INT step_span_resume;		  /* Step span to output geo file */
     INT mem_max;		  /* Max memory per process */
     INT n_bdry_layer;		  /* # of boundary layers */
     /* INT moc_quad_order;		  /\* MOC quad order *\/ */
     /* INT moc_quad_nelem;		  /\* MOC quad nelem *\/ */
     BOOLEAN compute_error;	  /* Compute error */
 
+    FLOAT grid_coord_unit;	/* Grid coord unit [m] */
+
     char *fn;			  /* Mesh file */
     char *resume_mesh;		  /* Resume mesh file */
     char *resume_data;		  /* Resume data file */
     char *Stokes_opts;		  /* Solver Stokes options */
+    char *fo_opts;		  /* Solver Stokes options */
+    char *proj_opts;		  /* Solver Stokes options */
     char *F_opts;		  /* Solver F options*/
     char *Fu_opts;		  /* Solver Fu options*/
     char *Ap_opts;		  /* Solver Ap options*/
     char *Qp_opts;		  /* Solver Qp options*/
     char *Fp_opts;		  /* Solver Fp options*/
-    char *Gu_opts;		  /* Grad u options*/
     char *T_opts;		  /* Solver temperature opts */
 
-    /* 2D file */
-    char *tria_file;
-    char *vert_file;
-    char *layer_file;
-    char *nodeZ_file;
-    char *dual_file;
-    char *bed_txt_file;
-    char *sur_txt_file;
-    char *thk_txt_file;
-    char *x_txt_file;
-    char *y_txt_file;
-    char *sur_grad_x_txt_file;
-    char *sur_grad_y_txt_file;
-    int row_txt;
-    int col_txt;
-    FLOAT xllcorner_txt;
-    FLOAT yllcorner_txt;
-    FLOAT nodata_value_txt ;
-    FLOAT dx_txt;
-    FLOAT dy_txt;
-    int len_txt1D;
-    FLOAT x_start_txt1D;
-    FLOAT x_end_txt1D;
-    FLOAT dx_txt1D;
+    char *topo_file;		/* Topo and beta2 file  */
+    double topo_shift_x;	/* Topo shift x direction, unit: km */
+    double topo_shift_y;
 
-    /* Netcdf file */
-    char *nc_file;
+    /* Ref solution file */
+    BOOLEAN compute_error_ref;	  /* Compute error to ref */
+    char *ref_sol_file;
+    
+    /* PC levels */
+    int n_pc_level;
+    char *fn_L[PC_MAX_LEVEL];			  /* Mesh file */
+    char *tria_file_L[PC_MAX_LEVEL];
+    char *vert_file_L[PC_MAX_LEVEL];
+    char *layer_file_L[PC_MAX_LEVEL];
+    char *nodeZ_file_L[PC_MAX_LEVEL];
+    char *dual_file_L[PC_MAX_LEVEL];
+    char *nc_file_L[PC_MAX_LEVEL];
+
+    BOOLEAN pc_reuse_L[PC_MAX_LEVEL];
+    int pc_type_L[PC_MAX_LEVEL];
+
+    char *pc_smoother_Lp;
+    char *pc_smoother_L[PC_MAX_LEVEL];
+
+
+	/* debugging controls */
+	BOOLEAN output_non_iter;
+	BOOLEAN output_temp_init;
+	BOOLEAN output_parted;
+	BOOLEAN output_beta;
+	BOOLEAN output_melt;
+	BOOLEAN output_fv_vert;
+	
 } NSParams;
 
-/* PCD Preconditioner */
-typedef struct NSPC_ {
-    DOF *pbc;			  /* pressure bdry condition
-				   * for preconditioner */
-    MAP *Pbcmap;		  /* pressure dof map for preconditioner */
-    DOF *u1;			  /* velocity component u */
-    MAP *u1map;			  /* velocity component u map */
 
-    MAT *matFu;			  /* matrix of convection-diffusion */
-    MAT *matQp;			  /* matrix of pressure mass */
-    MAT *matAp;			  /* matrix of pressure diffusion */
-    MAT *matFp;			  /* matrix of pressure convection-diffusion */
-    VEC *rhsScale;		  /* rhs scale */
 
-    /* DOF and map to specify boundary condition for pressure
-     * convection-diffusion problem. */
-    DOF *dof_inflow, *dof_outflow, *dof_nobdry;
-    MAP *map_inflow, *map_outflow, *map_nobdry;
 
-    SOLVER *solver_F;		  /* PC solver of velocity convection-diffusion */
-    SOLVER *solver_Fu;		  /* PC solver of velocity convection-diffusion, seperated */
-    SOLVER *solver_Ap;		  /* PC solver of pressure diffusion */
-    SOLVER *solver_Qp;		  /* PC solver of pressure mass */
-    SOLVER *solver_Fp;		  /* PC solver of pressure convection-diffusion */
-    SOLVER *pc_F;		  /* mg shell PC solver of velocity convection-diffusion */
-    SOLVER *pc_Ap;		  /* mg shell PC solver of velocity convection-diffusion */
-    SOLVER *pc_Qp;		  /* mg shell PC solver of velocity convection-diffusion */
-    SOLVER *pc_Zp;		  /* mg shell PC solver of velocity convection-diffusion */
-} NSPC;				  
 
 /* Surface bases */
 typedef struct SURF_BAS_ {
     DOF_TYPE *type;
     DOF *dof;
     BOOLEAN *rotated;
+    char dim;
 } SURF_BAS;
 
-/*
-typedef struct GEO_INFO_{
-    DOF *ice_sur;
-    DOF *ice_bed;
-    DOF *ice_thk;
-    DOF *sur_grad_x;
-    DOF *sur_grad_y;
-} GEO_INFO;
-*/
+
+
+typedef void (USER_FUNC_ICE)(NSSolver *ns);
+
 /* Main solver */
-typedef struct NSSolver_ {
+struct NSSolver_ {
     GRID *g;			  /* Grid */
     DOF **u;			  /* velocity ptr */
+    DOF *u_edge;		  /* velocity on edge, discontinous */
     DOF **p;			  /* pressure ptr */
     DOF **T;			  /* conformation tensor */
 #if STEADY_STATE || TIME_DEP_NON 
@@ -422,34 +341,29 @@ typedef struct NSSolver_ {
     DOF **lapu;			  /* laplace velocity ptr */
     DOF **gradp;		  /* gradient pressure ptr */
     DOF *Gradu;		  /* gradient temperature ptr */
-
-    DOF *nodal_force;
-    DOF *nodal_force_value;
-    DOF *water_force;
-    DOF *contact_force;
-    DOF *contact_force_value;
-
-    DOF *stress;
-    DOF *stress1;
-    DOF *water_pressure;
-    DOF *water_pressure1;
-    DOF *stress_nn;
-    DOF *stress_nn1;
-    DOF *mask_bot;
-    DOF *avg_gu;
     DOF *f;			  /* source term momentum  */
     DOF *u_queue[3];		  /* velocity at different time */
     DOF *p_queue[3];		  /* pressure at different time */
     DOF *T_queue[3];		  
     DOF *gradu_queue[3];	  /* gradient velocity at different time */
+    DOF *div0;			  /* velocity divergence on element */
     DOF *u_shape;		  /* velocity shape DOF */
     DOF *p_shape;		  /* pressure shape DOF */
+    DOF *un_shape;		  /* velocity shape DOF */
+    DOF *bub_shape;		  /* velocity shape DOF */
     DOF *T_shape;		  /* proj Gradient vel shape DOF */
     DOF *gn[3];			  /* Outflow bdry condition for velocity & pressure*/
     DOF *wind;			  /* predicted velocity */
     DOF *dH;			  /* coord change */
+    DOF *dHt;			  /* coord change rate */
     DOF *beta;			  /* slip coef */
+    DOF *bottom_normal;		  /* bedrock normal: outwards */
+    DOF *top_normal;		  /* top surf normal */
+    DOF *lateral_normal;	  /* lateral normal */
     DOF *coord;			  /* coord(P1) */
+    DOF *coord_sigma;		  /* coord(P1), sigma */
+    DOF *p_static;		  /* hydro static pressure */
+    DOF *nu;			  /* Viscosity for interp */
 
     INT pinned_node_id;	          /* Vert index of pinned node at rank 0
 				   * -1 for no pinned. */
@@ -467,21 +381,27 @@ typedef struct NSSolver_ {
     MAT *matB;			  /* matNS[1][0] */
     MAT *matC;			  /* matNS[1][1] */
 
-    MAT *matNS0;
-    MAT *matF0;			  /* matNS[0][0] */
-    MAT *matBt0;			  /* matNS[0][1] */
-    MAT *matB0;			  /* matNS[1][0] */
-    MAT *matC0;			  /* matNS[1][1] */
-    VEC *vec_rhs0;
+#if USE_SLIDING_BC
+    DOF *Un;			  /* Langrangian Mutiplier of u dot n */
+    DOF *dUn;			  /* d Un */
+    
+    MAP *UNmap;			  /* pressure dof map */
+
+    MAT *matUn;
+    MAT *matUnT;
+    MAT *matUnD;
+#endif
+
 
     MAT *matT;			  /* Mat T, bottom free */
     VEC *rhsT;
     
-    SOLVER *solver_u0;		  /* solver of the coupled problem */
     SOLVER *solver_u;		  /* solver of the coupled problem */
     SOLVER *solver_T;		  /* solver of conformation tensor */
     SOLVER *pc;			  /* preconditioner */
-    NSPC *pcd;			  /* PCD preconditioner  */
+
+    //OCT_TREE *og;		/* Oct tree for search */
+
 #if USE_MG 
     MULTI_GRID *mg;		  /* Multi grid solver */
 #endif /* USE_MG */
@@ -491,9 +411,14 @@ typedef struct NSSolver_ {
     BOOLEAN *T_actc;		/* Temperature active constrain */
     FLOAT *T_cntr;		/* Temperature constrains value */
 
+    /* GradS */
+    DOF *dof_gradS;		/* grad S */
+
     /* Depth */
     DOF *depth_P1;		/* Depth P1 */
-    DOF *depth_P2; 		/* Depth P2 */
+    DOF *depth_T; 		/* Depth of T fe type */
+	DOF *height;		/* Height P1 */
+	DOF *sigma_z;
 
     /* Variables */
     FLOAT non_res;		  /* nonlinear residual */
@@ -505,7 +430,9 @@ typedef struct NSSolver_ {
     INT tstep;			  /* current time step */
     int viscosity_type;	          /* Viscosity types: const, T-indep, T-dep, ... */
     LTYPE ltype;	          /* Picard or Newton */
+
     SURF_BAS *surf_bas;
+    SURF_BAS *surf_bas_2d;
 
     /* Layred mesh */
     LAYERED_MESH *gL;		  /* Layered mesh */
@@ -513,9 +440,15 @@ typedef struct NSSolver_ {
     /* DOF *coord; */
 
     NSParams *ns_params;	  /* Parameter list */
-} NSSolver;
+    USER_FUNC_ICE *init_func;	  /* init function */
+    USER_FUNC_ICE *mark_bdry_temp; /* Mark bdry by tempertature */
+    USER_FUNC_ICE *check_div;      /* Check divergence */
+} ;
 
 
+typedef struct NSPCSolver_ {
+    
+} NSPCSolver;
 
 
 /*
@@ -531,9 +464,6 @@ enum { VIS_CONST  = 0,
        VIS_STRAIN = 1,
        VIS_TEMP	  = 2};
 
-extern FLOAT _Length_;
-extern FLOAT _alpha_;
-
 extern FLOAT nu_max;
 extern FLOAT nu_min;
 
@@ -547,6 +477,15 @@ typedef struct TIME_LOCK_ {
 extern TIME_LOCK *time_lock; 
 
 
+#define SIMPLE_TEST 0  /* simple test for convergence */
+#if SIMPLE_TEST
+#  define SIMPLE_INIT_SLOP				\
+    FLOAT _alpha_ = 0.;					\
+    FLOAT _length_ = 5.;				\
+    FLOAT tan_alpha = tan(M_PI * _alpha_ / 180);
+#endif
+
+
 /*
  * ================================================================================
  * 
@@ -558,26 +497,44 @@ extern TIME_LOCK *time_lock;
     void func_xyz##_t(FLOAT x, FLOAT y, FLOAT z, FLOAT t, FLOAT *values);    
 
 /* ins-solver.c */
-NSSolver *phgNSCreate(GRID *g, NSParams *ns_params);
+NSParams *phgParametersCreate();     
+NSSolver *phgNSCreate(GRID *g, LAYERED_MESH *gL, NSParams *ns_params);
 void phgNSFinalize(NSSolver **ns);
 void phgNSTimeAdvance(NSSolver *ns, FLOAT time, int tstep);
 INT phgNSPinNode(NSSolver *ns);
 
 void phgNSInitSolverU(NSSolver *ns);
 void phgNSReInitSolverU(NSSolver *ns);
-void phgNSBuildSolverUMat(NSSolver *ns, INT, INT, FLOAT);
-//void phgNSBuildSolverUMat(NSSolver *ns);
-//void phgNSBuildSolverURHS(NSSolver *ns, GEO_INFO *geo);
-void phgNSBuildSolverURHS(NSSolver *ns, INT, INT, FLOAT);
-//void phgNSBuildSolverURHS(NSSolver *ns);
+void phgNSBuildSolverUMat(NSSolver *ns);
+void phgNSBuildSolverURHS(NSSolver *ns);
 void phgNSSolverUAssemble(NSSolver *ns);
 void phgNSDestroySolverU(NSSolver *ns);
+
+FLOAT *get_gbas_product_stokes(const FLOAT *gi, const FLOAT *gj,
+			       const FLOAT *gu, LTYPE ltype); 
+FLOAT *get_gbas_product_fo(const FLOAT *gi, const FLOAT *gj,
+			       const FLOAT *gu, LTYPE ltype); 
+
+
+void build_prism_elems(GRID *g, LAYERED_MESH *gL);
+void phgNSBuildSolverUMatPrism(NSSolver *ns);
+void phgNSBuildSolverURHSPrism(NSSolver *ns);
+
+
+
+void buildFOMatPrism(NSSolver *ns, DOF *dof_uv, DOF *dof_du, SOLVER *solver_uv);
+void buildFORHSPrism(NSSolver *ns, DOF *dof_uv, DOF *dof_du, SOLVER *solver_uv);
+void buildProjGuPrism(NSSolver *ns, SOLVER *solver, VEC **vec, const BYTE *components);
 
 void getPecletNum(GRID *g, DOF *u, FLOAT nu, int order);
 void phgDofMaxMin(DOF *u, FLOAT *umax, FLOAT *umin);
 void estimate_error(NSSolver *ns, DOF *error);
 void phgResumeLogUpdate(GRID *g, FLOAT *time, int *tstep, char *mesh_file, char *data_file);
 void phgResumeStage(GRID *g, FLOAT *time, int *tstep, char *mesh_file, char *data_file);
+
+/* PC */
+NSPCSolver *nsPCCreate(NSSolver *ns, NSParams *ns_params);
+void nsPCBuildMat(NSPCSolver *pcSolver, int non_step);
 
 /* save load */
 void save_dof_data(GRID *g, DOF *dof, const char *file);
@@ -586,6 +543,11 @@ void load_dof_data2(GRID *g, DOF *dof, const char *data_file, const char *mesh_f
 void save_dof_data3(GRID *g, DOF *dof, const char *file);
 void load_dof_data3(GRID *g, DOF *dof, const char *data_file, const char *mesh_file);
 void ns_dof_copy(NSSolver *ns, DOF *u, DOF *p);
+
+void save_state(int tstep, double time, int ndof, DOF **dofs, char **dof_names);
+void load_state(int tstep, double *time, int ndof, DOF **dofs, char **dof_names);
+
+
 
 /* ins-bc.c */
 int my_bc_map(int bctype);
@@ -609,18 +571,11 @@ void func_T(FLOAT x, FLOAT y, FLOAT z, FLOAT *value);
 void func_fT(FLOAT x, FLOAT y, FLOAT z, FLOAT *value);
 void func_beta(FLOAT x, FLOAT y, FLOAT z, FLOAT *beta);
 void func_q(FLOAT x, FLOAT y, FLOAT z, FLOAT *value);
-void func_ice_slab(FLOAT x, FLOAT y, FLOAT z, FLOAT *coord);
-void func_ice_shelf_mask(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_shelf_mask);
-void func_ice_shelf_pres(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_shelf_pres);
-void func_ice_sur(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_sur);
-void func_ice_bed(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_bed);
-void func_ice_thk(FLOAT x, FLOAT y, FLOAT z, FLOAT *ice_thk);
-void func_sur_grad_x(FLOAT x, FLOAT y, FLOAT z, FLOAT *sur_grad_x);
-void func_sur_grad_y(FLOAT x, FLOAT y, FLOAT z, FLOAT *sur_grad_y);
 void func_xyz_(FLOAT x, FLOAT y, FLOAT z, FLOAT *coord);
 void func_s(FLOAT x, FLOAT y, FLOAT z, FLOAT *s);
 void func_b(FLOAT x, FLOAT y, FLOAT z, FLOAT *b);
 void func_a(FLOAT x, FLOAT y, FLOAT *a);
+void func_normal(FLOAT x, FLOAT y, FLOAT z, FLOAT *a);
 
 FUNC_T_DECLARE(func_u);
 FUNC_T_DECLARE(func_p);
@@ -628,20 +583,8 @@ FUNC_T_DECLARE(func_gradu);
 FUNC_T_DECLARE(func_gradp);
 FUNC_T_DECLARE(func_f);
 FUNC_T_DECLARE(func_T);
+FUNC_T_DECLARE(func_q);
 
-
-/* ins-sovler.c */
-NSParams *phgParametersCreate(void);
-NSSolver *phgNSCreate(GRID *g, NSParams *ns_params0);
-void phgNSFinalize(NSSolver **ns_ptr);
-void phgNSTimeAdvance(NSSolver *ns, FLOAT time, int tstep);
-
-void phgNSInitSolverU(NSSolver *ns);
-//void phgNSBuildSolverURHS(NSSolver *ns, GEO_INFO *geo);
-//void phgNSBuildSolverURHS(NSSolver *ns);
-//void phgNSBuildSolverUMat(NSSolver *ns);
-void phgNSDestroySolverU(NSSolver *ns);
-void iceSetBoundaryTypes(NSSolver *ns);
 
 /* temp-solver.c */
 void phgNSInitSolverT(NSSolver *ns);
@@ -653,13 +596,13 @@ void phgNSSolverTBuildConstrain(NSSolver *ns);
 void find_melt_region(NSSolver *ns);
 void phgNSSolverTSolve(NSSolver *ns, BOOLEAN init_T);
 void phgNSTempInit(NSSolver *ns);
-void proj_gradu(NSSolver *ns, DOF *gradu);
+void proj_gradu(NSSolver *ns, DOF *gradu, const BYTE *components, int type);
 
 
 /* ins-pcd.c */
 void phgNSInitPc(NSSolver *ns);
 void phgNSBuildPc(NSSolver *ns);
-void pc_proc(SOLVER *pc_solver, VEC *b0, VEC **x0);
+void pc_proc(void *ctx, VEC *b0, VEC **x0);
 void phgNSDestroyPc(NSSolver *ns);
 void estimate_error(NSSolver *ns, DOF *error);
 
@@ -675,6 +618,25 @@ void checkBdry(GRID *g);
 int my_bc_map(int bctype);
 void dof_range(DOF *u);
 void output_bottom_dofs(NSSolver *ns, int tstep);
+DOF *proj_G1(NSSolver *ns, DOF *p0, DOF **p1_ptr);
+void check_div(DOF *gradu, DOF **divu);
+void plot_residual(NSSolver *ns, VEC *residual, int non_step);
+void plot_surf_force(NSSolver *ns);
+void mark_inactive(NSSolver *ns);
+void save_solution_dat(NSSolver *ns);
+void compute_error_ref(NSSolver *ns);
+void init_by_ref_solution(NSSolver *ns);
+void install_error_log();
+void get_p_static(NSSolver *ns);
+void get_p_static_prism(NSSolver *ns);
+int phgCompEdge(const void *p0, const void *p1);
+int phgCompEdgeMark(const void *p0, const void *p1);
+void get_avg_n(GRID *g, DOF *sur_normal);
+
+
+void load_ref_solution();
+const FLOAT *interp_ref_solution(FLOAT *X, FLOAT sigma);
+
 
 /* ins-mg.c */
 void build_mg_levels(NSSolver *ns, int i_slv);
@@ -686,23 +648,34 @@ void fv_upwind(SIMPLEX *e, DOF *wind, FLOAT nu,
 		FLOAT Samarskij_alpha, int order, FLOAT *values);
 
 /* ice-grid.c */
-//GEO_INFO *ice_grid(GRID *g);
 void ice_grid(GRID *g);
-FLOAT get_effective_viscosity(const FLOAT *gu, FLOAT T, FLOAT p,
-			      BOOLEAN initialiszed);
 void ice_monitor(NSSolver *ns, int nonstep);
 BOOLEAN iceParter(GRID *g, int nprocs, DOF *weights, FLOAT power);
-//GEO_INFO *iceInit(GRID *g, LAYERED_MESH **gL);
-void iceInit(GRID *g, LAYERED_MESH **gL);
 
 /* slip-bdry.c */
-SURF_BAS *get_surface_bases(GRID *g, DOF_TYPE *u_type);
-void trans_left(FLOAT *A, int ncol, int lda, const FLOAT *Trans); 
-void trans_leftT(FLOAT *A, int ncol, int lda, const FLOAT *Trans); 
-void trans_rightT(FLOAT *A, int ncol, int lda, const FLOAT *Trans); 
+#define get_surface_bases_2d(ns, u_type) get_surface_bases(ns, u_type, 2)
+#define get_surface_bases_3d(ns, u_type) get_surface_bases(ns, u_type, 3)
+SURF_BAS *get_surface_bases(NSSolver *ns, DOF_TYPE *u_type, int rdim);
+
+#define trans_left_3d(A, ncol, lda, T) trans_left(A, ncol, lda, 3, T) 
+#define trans_leftT_3d(A, ncol, lda, T) trans_leftT(A, ncol, lda, 3, T) 
+#define trans_rightT_3d(A, ncol, lda, T) trans_rightT(A, ncol, lda, 3, T) 
+
+#define trans_left_2d(A, ncol, lda, T) trans_left(A, ncol, lda, 2, T) 
+#define trans_leftT_2d(A, ncol, lda, T) trans_leftT(A, ncol, lda, 2, T) 
+#define trans_rightT_2d(A, ncol, lda, T) trans_rightT(A, ncol, lda, 2, T) 
+    
+void trans_left(FLOAT *A, int ncol, int lda, int dim, const FLOAT *Trans); 
+void trans_leftT(FLOAT *A, int ncol, int lda, int dim, const FLOAT *Trans); 
+void trans_rightT(FLOAT *A, int ncol, int lda, int dim, const FLOAT *Trans); 
+
 void rotate_dof_bases(DOF *u, SURF_BAS *surf_bas, BOOLEAN forward);
 void dof_set_normal_data(DOF *u_h, SURF_BAS *surf_bas);
 extern FLOAT trans_eye[Dim*Dim];
+DOF *get_bottom_normal(NSSolver *ns);
+DOF *get_lateral_normal(NSSolver *ns);
+void get_orth_bases(FLOAT *normal, FLOAT *T);
+void update_floating(NSSolver *ns);
 
 
 /* moving-mesh.c */
@@ -714,20 +687,63 @@ void get_layer_height(FLOAT *H, int nv, const FLOAT *ratio, FLOAT h0, FLOAT h1);
 void get_height_depth(NSSolver *ns);
 
 /* fv-solver.c */
-void fv_solver_init(const char *node_file,
-		    const char *trig_file, 
-		    const DOF_USER_FUNC func_f);
-void fv_update(const double *H, 
+typedef void (*DOF_USER_FUNC_T)(double x, double y, double z, 
+				double t, double *values);
+
+void fv_solver_init(void **fv_data,
+		    const char *mesh_file,
+		    FLOAT (*verts)[4],
+		    const DOF_USER_FUNC_T func_f);
+void fv_update(void *fv_data,
+	       const double *H, 
+		   FLOAT (*verts)[4],
 	       const double *U, 
 	       double *dH, 
-	       double *U_vert);
+	       double *U_vert, 
+	       double t);
 
 /* update_surf.c */
 void struct_mesh_init(GRID *g);
 void struct_mesh_reinit(GRID *g);
 void struct_mesh_update(NSSolver *ns, int tstep, double t);
 
+/* core-shallow.c */
+void core_SIA(NSSolver *ns);
+void get_moved_coord_SIA(NSSolver *ns, int tstep);
 
+/* core-FO.c */
+void core_FO(NSSolver *ns, int tstep);
+void reconstruct_velocity_w(NSSolver *ns);
+
+/* Netcdf tools */
+void load_topo_data(const char *filename);
+#define interp_topo_data(v, x, y) \
+    interp_topo_dataT(v, x, y, 0);
+double interp_topo_dataT(char var_type, double x, double y, double t);
+
+
+/* Problem dependent */
+void iceInit(GRID *g, LAYERED_MESH **gL);
+void iceInitPC(GRID *g, int iLevel, LAYERED_MESH **gL);
+void iceSetUserFunc(NSSolver *ns);
+void func_ice_slab(FLOAT x, FLOAT y, FLOAT z, FLOAT *coord);
+FLOAT func_ice_topg(FLOAT x, FLOAT y);
+void map_coord_inv(FLOAT x, FLOAT y, FLOAT *x_, FLOAT *y_);
+FLOAT get_effective_viscosity(const FLOAT *gu, FLOAT T, FLOAT p,
+			      BOOLEAN initialiszed);
+void load_case_options();
+
+
+
+/* Missing */
+#define phgExportTecplot(...)
+#define phgPartUserSetFunc(...)
+
+/* redundent sizeof */
+#define PHG_ALLOC(p, n) p = phgAlloc(n * sizeof(*p));
+#define PHG_CALLOC(p, n) p = phgCalloc(n, sizeof(*p));
+#define PHG_REALLOC(p, n1, n0) p = phgRealloc_(p, n1 * sizeof(*p), \
+                                               n0 * sizeof(*p));
 
 
 /*
@@ -738,24 +754,35 @@ void struct_mesh_update(NSSolver *ns, int tstep, double t);
  * ================================================================================
  * */
 
-#define OUTPUT_DIR "./OUTPUT/"
-#define dH_OUTPUT_DIR "./dH_OUTPUT/"
-#define MASK_OUTPUT_DIR "./MASK_OUTPUT/"
+#define OUTPUT_DIR "output/"
 #define X_DIR 0
 #define Y_DIR 1
 #define Z_DIR 2
+#define UN_DIR X_DIR
+#define LN_DIR Y_DIR
 #define DDim (Dim*Dim)
 
+typedef INT EdgeVerts[2];
+typedef INT EdgeMarks[3];
 
 
 /* Quad macros */
 #define NbasFace(u) (3 * (u->type->np_vert + u->type->np_edge)	\
 		     + u->type->np_face)
 #define SQUARE(x) ((x)*(x))
+#define INNER_PRODUCT2(p, q)			\
+    (*(p    ) * *(q    ) +			\
+     *(p + 1) * *(q + 1))
 #define INNER_PRODUCT(p, q)			\
     (*(p    ) * *(q    ) +			\
      *(p + 1) * *(q + 1) +			\
      *(p + 2) * *(q + 2))
+#define CROSS_PRODUCT(a, b, n) {                      \
+        n[0] =  (a[1] * b[2] - b[1] * a[2]);        \
+        n[1] = -(a[0] * b[2] - b[0] * a[2]);        \
+        n[2] =  (a[0] * b[1] - b[0] * a[1]);        \
+    }
+
 
 #define BasisOrder(u, e, i) (!DofIsHP(u) ? (u)->type->order :		\
 			      (u)->hp->info->types[(u)->hp->elem_order[e->index]]->order)
@@ -807,7 +834,12 @@ void struct_mesh_update(NSSolver *ns, int tstep, double t);
     phgQuadGetBasisGradient(e, u, i, quad) + q*Dim
 
 
-
+#define SORT_TWO_VERT(v0, v1) {			\
+	int vv;					\
+	if (v0 > v1) {				\
+	    vv = v0; v0 = v1; v1 = vv;		\
+	}					\
+    }
 
 
 
@@ -819,46 +851,66 @@ void struct_mesh_update(NSSolver *ns, int tstep, double t);
  * ================================================================================
  * */
 
-#if 0
-#define SHOW_M(matN, mat_m, mat_n) {				\
-	printf("\n### rank: %d\n", g->rank);			\
-	int i, j;						\
-	printf(" --- "#matN":(%3d * %3d)\n", mat_m, mat_n);	\
-	for (i = 0; i < mat_m; i++) {				\
-	    for (j = 0; j < mat_n; j++){			\
-		printf("%14.8f, ", *(matN + i * (mat_n) + j));	\
-	    }							\
-	    printf("\n");					\
-	}							\
+#if 1
+#define SHOW_M(matN, mat_m, mat_n) {					\
+	phgInfo(2, "\n### rank: %d\n", g->rank);			\
+	int i, j;							\
+	phgInfo(2, " --- "#matN":(%3d * %3d)\n", mat_m, mat_n);		\
+	for (i = 0; i < mat_m; i++) {					\
+	    for (j = 0; j < mat_n; j++){				\
+		phgInfo(2, "%30.15e, ", *(matN + i * (mat_n) + j));	\
+	    }								\
+	    phgInfo(2, "\n");						\
+	}								\
     }
 
 #define SHOW_M3(matN, mat_k, mat_m, mat_n) {				\
-	printf("\n### rank: %d\n", g->rank);				\
+	phgInfo(2, "\n### rank: %d\n", g->rank);			\
 	int i, j, k;							\
-	printf("--- --- %15s :(%3d * %3d)\n", #matN, mat_m, mat_n);	\
+	phgInfo(2, "--- --- %15s :(%3d * %3d)\n", #matN, mat_m, mat_n);	\
 	for (k = 0; k < mat_k; k++) {					\
-	    printf("  comp: %d\n", mat_k);				\
+	    phgInfo(2, "  comp: %d\n", mat_k);				\
 	    for (i = 0; i < mat_m; i++) {				\
-		printf("    ");						\
+		phgInfo(2, "    ");					\
 		for (j = 0; j < mat_n; j++){				\
-		    printf("%10f, ", *(matN + k * mat_m * mat_n +	\
-				       i * mat_n + j));			\
+		    phgInfo(2, "%10f, ", *(matN + k * mat_m * mat_n +	\
+					   i * mat_n + j));		\
 		    if (mat_n > 10 && j%5 == 4)				\
-			printf("\n    ");				\
+			phgInfo(2, "\n    ");				\
 		}							\
-		printf("\n");						\
+		phgInfo(2, "\n");					\
 	    }								\
 	}								\
     }
 
 #define SHOW_V(vec, vec_n) { int _i;		\
-	printf("\n### rank: %d\n", g->rank);	\
-	printf(" --- "#vec":(%3d)\n", vec_n);	\
+	phgInfo(2, " --- "#vec":(%3d)\n", vec_n);	\
 	for (_i = 0; _i < vec_n; _i++) {	\
-	    printf("%10f, ", *(vec + _i));	\
+	    phgInfo(2, "%10f, ", *(vec + _i));	\
 	}					\
-	printf("\n");				\
+	phgInfo(2, "\n");				\
+    }
+
+#define SHOW_iV_(verb_, vec, vec_n) { int _i;		\
+	phgInfo(verb_, " --- "#vec":(%3d)\n", vec_n);	\
+	for (_i = 0; _i < vec_n; _i++) {	\
+	    phgInfo(verb_, "%4d, ", *(vec + _i));	\
+	}					\
+	phgInfo(verb_, "\n");				\
     }			
+
+#define SHOW_iM(matN, mat_m, mat_n) {				\
+	int i, j;						\
+	phgInfo(2, " --- "#matN":(%3d * %3d)\n", mat_m, mat_n);	\
+	for (i = 0; i < mat_m; i++) {				\
+	    for (j = 0; j < mat_n; j++){			\
+		phgInfo(2, "%5d, ", *(matN + i * (mat_n) + j));	\
+	    }							\
+	    phgInfo(2, "\n");					\
+	}							\
+    }
+
+
 #endif
 
 #define PRINT_ELAPSED_TIME(str, ...)	\
@@ -866,12 +918,12 @@ void struct_mesh_update(NSSolver *ns, int tstep, double t);
     elapsed_time(__VA_ARGS__);
     
 
-#if 1
+#if 0
 #define DOF_SCALE(u, desp) {}
 #elif 0
 # define DOF_SCALE(u, desp)					\
     dof_range(u);
-#elif 0
+#elif 1
 # define DOF_SCALE(u, desp)					\
     phgPrintf("    %s: [%16.8e, %16.8e]\n",			\
 	      (u)->name,					\
@@ -948,50 +1000,3 @@ void struct_mesh_update(NSSolver *ns, int tstep, double t);
 
 #define INS_H
 #endif
-
-double** read_txt_data(char *file_name, int row, int col);
-
-void get_mask_bot(NSSolver *ns);
-void get_sur_normals_z(GRID *g, DOF *sur_normal_z);
-void get_sur_normals_y(GRID *g, DOF *sur_normal_z);
-void get_sur_normals_x(GRID *g, DOF *sur_normal_z);
-void get_avg_n(GRID *g, DOF *sur_normal);
-INT check_u_convergence(NSSolver *ns, DOF *u, DOF *p, DOF *u_last, DOF *p_last, FLOAT, FLOAT);
-INT check_u_convergence0(NSSolver *ns, DOF *u, DOF *p, DOF *u_last, DOF *p_last, FLOAT, FLOAT);
-void func_smb_top(FLOAT x, FLOAT y, FLOAT z, FLOAT *value);
-void func_smb_bot(FLOAT x, FLOAT y, FLOAT z, FLOAT *value);
-void func_smb_slf(FLOAT x, FLOAT y, FLOAT z, FLOAT *value);
-void func_bed_z(FLOAT x, FLOAT y, FLOAT z, FLOAT *bed_z);
-void update_grounding_line(NSSolver *ns, int tstep);
-void get_water_pressure(NSSolver *);
-void get_nodal_force(NSSolver *ns);
-void get_nodal_force_value(NSSolver *ns);
-void get_water_force(NSSolver *ns);
-void get_contact_force(NSSolver *ns);
-void get_contact_force_value(NSSolver *ns);
-void get_contact(NSSolver *ns);
-double* read_txt_data_1D(char *file_name, int len);
-void interp_txt_data_1D(double *data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, 
-        FLOAT x_start, FLOAT x_end, FLOAT dx, int len);
-void interp_txt_data(double **data, FLOAT x, FLOAT y, FLOAT z, FLOAT *a, 
-        int row, int col, FLOAT xllcorner, FLOAT yllcorner,
-        FLOAT NODATA_VALUE, FLOAT dx, FLOAT dy);
-INT if_update_shelf_mask(NSSolver *ns);
-void get_stress(NSSolver *ns, DOF *gradu, DOF *pressure);
-void get_stress1(NSSolver *ns);
-void get_normal_stress_value(NSSolver *ns);
-void get_water_pressure_value(NSSolver *ns);
-void get_water_pressure_value1(NSSolver *ns);
-INT check_surf_convergence(NSSolver *, DOF *, FLOAT);
-FLOAT get_ice_volume(GRID *g);
-void get_avg_gu(NSSolver *ns);
-DOF * compare_two_dofs(DOF *a, DOF *b);
-DOF * get_dof_component(GRID *g, DOF *a, DOF_TYPE *, INT dim_all, INT dim_asked);
-void get_smooth_surface_values(NSSolver *ns, DOF *dof_P1, int up_or_lower, int row, int col);
-void load_dH_from_file(NSSolver *ns, DOF *dof_P1, int up_or_lower, int row, int col);
-void save_free_surface_velo(NSSolver *ns, int which_dim, int up_or_lower, int row, int col);
-void save_free_surface_elev(NSSolver *ns, int up_or_lower, int row, int col);
-void modify_mask_bot(NSSolver *ns);
-void get_viscosity_field(GRID *g, DOF *strain_rate_e, DOF *viscosity);
-void get_effective_strain_rate_field(GRID *g, DOF *strain_rate, DOF *strain_rate_e);
-void get_strain_rate_field(GRID *g, DOF *velocity_grad, DOF *strain_rate);

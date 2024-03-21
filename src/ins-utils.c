@@ -5,6 +5,21 @@
  *
  *  */
 #include "ins.h"
+#include "mat_op3.h"
+#if USE_PETSC
+#  include <petscsys.h>
+#  include <petscviewer.h>
+#endif
+
+
+/* Segv */
+#include <signal.h>
+#include <execinfo.h> // backtrace(), etc
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdio.h>
 
 
 /* Print Macro defination */
@@ -13,15 +28,7 @@ NsSolver_Options()
 {
     /* Information of solver */
     phgPrintf("\n===============================================\n");
-    phgPrintf(" Incompressible Navier-stokes Solver options:  \n\n");
-#if STEADY_STATE
-#warning NS: steady state
-    phgPrintf("    STEADY-STATE case   \n");
-#elif TIME_DEP_NON
-#warning NS: time depentdent
-    phgPrintf("    TIME-DEPENDENT case   \n");
-#endif	/* STEADY_STATE */
-    phgPrintf("   Problem: "NS_PROBLEM"\n");
+    phgPrintf(" Ice sheet solver options:  \n\n");
     phgPrintf("===============================================\n\n");
 
     phgPrintf("Scaling:\n");
@@ -29,24 +36,65 @@ NsSolver_Options()
     phgPrintf("   len : %e\n", LEN_SCALING);
     phgPrintf("   pres: %e\n", PRES_SCALING);
 
-#warning netCDF disabled
-    //nc_data_scaling = LEN_SCALING;
-
-#if USE_SLIDING_BC
-    phgPrintf("Sliding BC.\n");
-#else
-    phgPrintf("No sliding BC.\n");
-#endif
-
-
-#if USE_SYMETRIC
-    assert(ns_params->use_symetric);
-#else
-    assert(!ns_params->use_symetric);
-#endif
+    if (ns_params->use_slide) {
+	phgPrintf("Sliding BC.\n");
+    }
+    else {
+	phgPrintf("No sliding BC.\n");
+    }
 
     return;
 }
+
+
+
+static
+void handler(int sig) {
+    void *array[100];
+    size_t size;
+
+    // get void*'s for all entries on the stack
+    size = backtrace(array, 100);
+
+    // print out all the frames to stderr
+    fprintf(stderr, "Error: signal %d:\n", sig);
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+
+    MPI_Finalize();             /* Cause other procs waiting,
+                                 * then manually interupte mpirun.
+                                 *  */
+
+    fprintf(stderr, "MPI finalized.\n");
+    exit(1);
+}
+
+void install_error_log()
+{
+    /* Redirect stderr */
+    {
+	char name[1000];
+	FILE *fp;
+
+	sprintf(name, "err/%04d.log", phgRank);
+	fp = fopen(name, "w");
+	if (fp == NULL) {
+	    phgError(0, "Error creating error file: %s, check that the directory ``err'' has been created.\n", name);
+	}
+	assert(fp != NULL);
+	dup2(fileno(fp), fileno(stderr));
+	fclose(fp);
+	fprintf(stderr, "redirect stderr.\n");
+    }
+
+
+    // install segv handler
+    signal(SIGSEGV, handler);
+    signal(SIGABRT, handler);
+    signal(SIGINT, handler);
+    //signal(SIGFPE, handler);  // 1/0 is not trapped
+    signal(SIGTERM, handler);
+}
+
 
 
 double
@@ -75,6 +123,15 @@ elapsed_time(GRID *g, BOOLEAN flag, double mflops)
 }
 
 
+
+
+/* --------------------------------------------------------------------------------
+ *
+ *  Solution utils 
+ *
+ *
+ * -------------------------------------------------------------------------------- */
+
 /* Dof norm for curved elements */
 FLOAT
 dofNormL2(DOF *dof)
@@ -99,6 +156,42 @@ dofNormL2(DOF *dof)
 	    phgDofEval(dof, e, p, v);
 	    for (i = 0; i < dim; i++)
 		norm += vol*(*w) * (v[i] * v[i]);
+	    w++; p += Dim+1;
+	}
+    }
+
+    a = norm;
+    MPI_Allreduce(&a, &b, 1, MPI_DOUBLE, MPI_SUM, g->comm);
+    norm = sqrt(b);
+    
+    return norm;
+}
+
+/* Dof norm for curved elements */
+FLOAT
+dofDiffNormL2(DOF *dof1, DOF *dof2)
+{
+    GRID *g = dof1->g;
+    SIMPLEX *e;
+    FLOAT norm = 0;
+    FLOAT a = 0, b = 0;
+    int i, dim = DofDim(dof1);
+    
+    ForAllElements(g, e) {
+	QUAD *quad = phgQuadGetQuad3D(2*DofTypeOrder(dof1, e));
+	FLOAT vol, det, v1[dim], v2[dim];
+	const FLOAT *p, *w;
+	int q;
+	
+	p = quad->points;
+ 	w = quad->weights;
+	for (q = 0; q < quad->npoints; q++) {
+	    phgGeomGetCurvedJacobianAtLambda(g, e, p, &det);
+	    vol = fabs(det / 6.);
+	    phgDofEval(dof1, e, p, v1);
+	    phgDofEval(dof2, e, p, v2);
+	    for (i = 0; i < dim; i++)
+		norm += vol*(*w) * (v1[i] - v2[i]) * (v1[i] - v2[i]);
 	    w++; p += Dim+1;
 	}
     }
@@ -209,6 +302,7 @@ void dof_range(DOF *u)
  * */
 void sym_check(NSSolver *ns)
 {
+#if 0
     if (0 && ns_params->use_symetric) {
 	VEC *xup = phgMapCreateVec(ns->solver_u->rhs->map, 1);
 	VEC *yup, *zup;
@@ -267,6 +361,7 @@ void sym_check(NSSolver *ns)
 	    }
 	}
     }
+#endif
 }
 
 
@@ -287,16 +382,39 @@ checkBdry(GRID *g)
         for (s = 0; s < NFace; s++) {
             FLOAT area = phgGeomGetFaceArea(g, e, s);
             if (e->bound_type[s] & BDRY_MASK) {
-                if (e->bound_type[s] & INFLOW)
+                if (e->bound_type[s] & BC_TOP)
                     a[0] += area;
-                if (e->bound_type[s] & OUTFLOW)
+                else if (e->bound_type[s] & BC_BOTTOM)
                     a[1] += area;
+                else if (e->bound_type[s] & BC_LATERAL)
+                    a[2] += area;
+                else if (e->bound_type[s] & BC_DIVIDE)
+                    a[3] += area;
+                else if (e->bound_type[s] & BC_FRONT)
+                    a[4] += area;
+		else
+		    a[6] += area;
             }
             else {
-                a[6] += area;
+                a[7] += area;
             }
         }
+
+	if (isnan(a[7])) {
+	    phgPrintf("voL: %d %e\n", e->index, phgGeomGetVolume(g, e));
+	    phgDumpElement(g, e);
+	    phgError(1, "Grid problem.\n");
+	}
     }
+
+    phgInfo(0, "\tTop     : %20.10e\n"
+	    "\tBottom  : %20.10e\n"
+	    "\tLateral : %20.10e\n"
+	    "\tDivide  : %20.10e\n"
+	    "\tFront   : %20.10e\n"
+	    "\tOther   : %20.10e\n",
+	    a[0], a[1], a[2], a[3], a[4], a[6]);
+
 
 #if USE_MPI
     {
@@ -307,10 +425,14 @@ checkBdry(GRID *g)
 #endif
 
     phgPrintf("Boundary types check:\n");
-    phgPrintf("\tInflow : %20.10e\n\tOutflow: %20.10e\n\tNoflow : %20.10e\n"
-              "\tsphere : %20.10e\n\tCyl    : %20.10e\n"
-              "\tOther  : %20.10e\n\tAll    : %20.10e\n\tVolume : %20.10e \n",
-              a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+    phgPrintf( "\tTop     : %20.10e\n"
+	       "\tBottom  : %20.10e\n"
+	       "\tLateral : %20.10e\n"
+	       "\tDivide  : %20.10e\n"
+	       "\tFront   : %20.10e\n"
+	       "\tOther   : %20.10e\n",
+	       a[0], a[1], a[2], a[3], a[4], a[6]);
+
 
     return;
 }
@@ -363,208 +485,1248 @@ getPecletNum(GRID *g, DOF *u, FLOAT nu, int order)
 
 
 
-FLOAT get_ice_volume(GRID *g)
+
+void 
+get_p_static(NSSolver *ns)
 {
-    SIMPLEX *e;
+    GRID *g = ns->g;
+    LAYERED_MESH *gL = ns->gL;
+    int i, j, k;
+    DOF *dofp_static;
 
-    FLOAT Vol = 0;
-    ForAllElements(g, e)
-    {
-        Vol += phgGeomGetVolume(g, e);
+    /* Removed */
+    /* if (ns_params->use_prism_elem) { */
+    /* 	get_p_static_prism(ns); */
+    /* 	return; */
+    /* } */
+
+    if (ns_params->stab_remove_static == 3) {
+	dofp_static = phgDofNew(g, DOF_P2, 1, "dofp_static", DofNoAction);
+	phgError(0, "Unimplemented!!!\n");
     }
-    FLOAT tmp = Vol;
-    MPI_Allreduce(&tmp, &Vol, 1, MPI_DOUBLE, MPI_SUM, g->comm);
+    else {
+	dofp_static = phgDofNew(g, DOF_P1, 1, "dofp_static", DofNoAction);
+    }
+	
+    for (i = 0; i < g->nvert; i++) {
+	if (g->types_vert[i] & BC_BOTTOM) {
+	    assert(gL->vert_local_lists[i] != NULL);
 
-    return Vol;
+	    FLOAT ztop;
+	    int nv = gL->vert_local_lists[i][0];
+	    int *iL = &gL->vert_local_lists[i][1];
+
+	    /* Pressure SIA:
+	     *  p =  rho g ( s - z )
+	     * */
+	    ztop = g->verts[iL[nv-1]][Z_DIR];
+	    for (j = 0; j < nv; j++) {
+		const FLOAT rho = RHO_ICE;
+		const FLOAT grav = GRAVITY;
+#if 1
+		*DofVertexData(dofp_static, iL[j]) =
+		    (rho * grav * (ztop - g->verts[iL[j]][Z_DIR]) * LEN_SCALING) / PRES_SCALING;
+#else
+#  warning ----- GLS only pressure -----		
+		/* GLS: only (0, 0, -rho g z) */
+		*DofVertexData(dofp_static, iL[j]) =
+		    (rho * grav * (0 - g->verts[iL[j]][Z_DIR]) * LEN_SCALING) / PRES_SCALING;
+#endif
+
+		phgInfo(3, "Vert: %10.5e %10.5e %10.5e: %10.5e %10.5e\n",
+			g->verts[iL[j]][0],
+			g->verts[iL[j]][1],
+			g->verts[iL[j]][2],
+			ztop, *DofVertexData(dofp_static, iL[j]));
+	    }
+	}
+    }
+
+    
+    if (ns->p_static == NULL) 
+	ns->p_static = dofp_static;
+    else 
+	phgDofCopy(dofp_static, &ns->p_static, NULL, "p_static");
+	
+    return;
 }
 
 
-void get_avg_gu(NSSolver *ns)
+
+/* projection of p0 to p1 */
+DOF *
+proj_G1(NSSolver *ns, DOF *p0, DOF **p1_ptr)
 {
     GRID *g = ns->g;
     SIMPLEX *e;
-    int i, j, k, l, s, q;
+    int i, j, q;
+    DOF *p1 = *p1_ptr;
+    VEC *vec_rhs;
+    static SOLVER *solver_p1 = NULL;
+    static BOOLEAN init = TRUE;
+    
+    /* L2 projection of pressure */
+    //p1 = phgDofNew(g, DOF_P1, 1, "pp1", DofNoAction);
 
-    DOF *gu[DDim];
-    MAP *map_gu[DDim];
-    VEC *vec_gu[DDim];
+    /* solver_p */
+    if (init) {
+	phgOptionsPush();
+	phgOptionsSetOptions("-solver gmres "
+			     "-solver_maxit 100 "
+			     "-solver_rtol 1e-10");
+	//phgOptionsSetOptions(Gu_opts);
+	solver_p1 = phgSolverCreate(SOLVER_DEFAULT, p1, NULL);
+	solver_p1->verb = 2;
+	phgOptionsPop();
+    }
 
-    DOF *u_P1 = phgDofCopy(ns->u[1], NULL, DOF_P1, NULL);
-    phgExportVTK(g, "u_P1.vtk", u_P1, ns->p[1], NULL);
+    vec_rhs = phgMapCreateVec(solver_p1->rhs->map, 1);
+    phgVecDisassemble(vec_rhs);
 
-    DOF *gu_P0 = phgDofGradient(u_P1, NULL, NULL, NULL);
+    /* Build linear system */
+    ForAllElements(g, e) {
+	int M = p1->type->nbas;	/* num of bases of Velocity */
+	int order = DofTypeOrder(p1, e) * 2;
+	FLOAT A[M][M], rhs[M];
+	INT I_[M];
+	QUAD *quad;
+	FLOAT vol, det;
+	const FLOAT *w, *p, *vp;
 
-    DOF *gu_all = phgDofNew(g, DOF_P1, DDim, "gradu_all", DofInterpolation);
+	Bzero(A); Bzero(rhs);
+	quad = phgQuadGetQuad3D(order);
+	vp = phgQuadGetDofValues(e, p0, quad); 
 
-    for (k = 0; k <DDim; k++)
-    {
-        gu[k] = phgDofNew(g, DOF_P1, 1, "gradu", DofNoAction);
-        map_gu[k] = phgMapCreate(gu[k], NULL);
-        vec_gu[k] = phgMapCreateVec(map_gu[k], 1);
-        phgVecDisassemble(vec_gu[k]);
+	p = quad->points;
+	w = quad->weights;
+	for (q = 0; q < quad->npoints; q++) {
+	    phgGeomGetCurvedJacobianAtLambda(g, e, p, &det);
+	    vol = fabs(det / 6.);
+
+	    for (i = 0; i < M; i++) {
+		const FLOAT *gi = phgQuadGetBasisValues(e, p1, i, quad) + q;    
+
+		if (init) {
+		    for (j = 0; j < M; j++) {
+			const FLOAT *gj = phgQuadGetBasisValues(e, p1, j, quad) + q;       
+			FLOAT qmass = vol*(*w) * (*gj) * (*gi);
+			A[i][j] += qmass;
+		    }
+		}
+		    
+		rhs[i] += vol*(*w) * (*vp) * (*gi); 
+	    }
+	    vp++;
+	    w++; p += Dim + 1;
+	}
+
+	/* Map: Element -> system */
+	for (i = 0; i < M; i++)
+	    I_[i] = phgMapE2L(solver_p1->mat->cmap, 0, e, i);
+
+	/* Global res */
+	if (init)
+	    for (i = 0; i < M; i++)
+		phgMatAddEntries(solver_p1->mat, 1, I_ + i, M, I_,
+				 &(A[i][0])); 
+
+	phgVecAddEntries(vec_rhs, 0, M, I_, &rhs[0]);
+    }				/* end element */
+
+    phgVecAssemble(vec_rhs);
+    phgVecAssemble(solver_p1->rhs);
+    phgVecAXPBY(1., vec_rhs, 0, &solver_p1->rhs);
+    phgVecDestroy(&vec_rhs);
+    solver_p1->rhs_updated = FALSE;
+
+    phgDofSetDataByValue(p1, 0.);
+    phgSolverSolve(solver_p1, FALSE, p1, NULL);
+    phgPrintf("      solver_p1: nits = %d, resid = %0.4lg\n",
+	      solver_p1->nits, solver_p1->residual);
+
+    init = FALSE;
+
+
+    return NULL;
+}
+
+
+
+void
+check_div(DOF *gradu, DOF **divu_ptr)
+{
+    GRID *g = gradu->g;
+    SIMPLEX *e;
+    int i;
+
+    /*
+     * div0 is a P0 DOF,
+     * in each element div0(e) = \int_e div(u) / \int_e.
+     *
+     * */
+    //DOF *div0 = phgDofNew(g, DOF_P0, 1, "div0", DofNoAction);
+    DOF *div0 = *divu_ptr;
+
+    ForAllElements(g, e) {
+	QUAD *quad;
+	FLOAT vol, det, dive;
+	const FLOAT *p, *w, *gu;
+	int q, order = DofTypeOrder(gradu, e) * 2;
+	
+	dive = 0;
+	quad = phgQuadGetQuad3D(order);
+	gu = phgQuadGetDofValues(e, gradu, quad);  /* grad u */
+
+	p = quad->points;
+ 	w = quad->weights;
+	for (q = 0; q < quad->npoints; q++) {
+	    phgGeomGetCurvedJacobianAtLambda(g, e, p, &det);
+	    vol = fabs(det / 6.);
+
+	    dive += (*w) * (gu[0] + gu[4] + gu[8]);
+	    w++; p += Dim+1;
+	    gu += DDim;
+	}
+	*DofElementData(div0, e->index) = dive;
+    }
+
+    DOF_SCALE(div0, "div0");
+    //phgDofFree(&div0);
+
+    return;
+}
+
+
+
+
+void
+plot_residual(NSSolver *ns, VEC *residual, int non_step)
+{
+    GRID *g = ns->g;
+    SIMPLEX *e;
+    int i, j, k, q;
+    static DOF *resu, *resp;
+    static SOLVER *solver_u = NULL, *solver_p = NULL;
+
+    if (solver_u == NULL) {
+	resu = phgDofCopy(ns->du, NULL, NULL, "resu");
+	resp = phgDofCopy(ns->dp, NULL, NULL, "resp");
+	resu->DB_masks[0] = 0;
+	resu->DB_masks[1] = 0;
+	resu->DB_masks[2] = 0;
+	resp->DB_mask = 0;
+
+	solver_u = phgSolverCreate(SOLVER_DEFAULT, resu, NULL);
+	solver_p = phgSolverCreate(SOLVER_DEFAULT, resp, NULL);
+	solver_u->verb = 0;
+	solver_p->verb = 0;
+    
+	ForAllElements(g, e) {
+	    int M = resu->type->nbas;	/* num of bases of Velocity */
+	    int N = resp->type->nbas;	/* num of bases of Pressure */
+	    int order = DofTypeOrder(resu, e) * 2;
+	    FLOAT Mu[M][Dim][M][Dim], Mp[N][N];
+	    QUAD *quad;
+	    FLOAT vol, det;
+	    INT Iu[M][Dim], Ju[Dim][M], Ip[N];
+	    const FLOAT *w, *p;
+
+	    for (i = 0; i < M; i++)
+		for (k = 0; k < Dim; k++)
+		    Ju[k][i] = Iu[i][k] = phgMapE2L(ns->matF->cmap, 0, e, i * Dim + k);
+	    for (i = 0; i < N; i++)
+		Ip[i] = phgMapE2L(ns->matC->cmap, 0, e, i);
+
+	    quad = phgQuadGetQuad3D(order);
+	
+	    Bzero(Mu); Bzero(Mp); 
+	    p = quad->points;
+	    w = quad->weights;
+	    for (q = 0; q < quad->npoints; q++) {
+		phgGeomGetCurvedJacobianAtLambda(g, e, p, &det);
+		vol = fabs(det / 6.);
+
+		for (i = 0; i < M; i++) {
+		    const FLOAT *gi_u = phgQuadGetBasisValues(e, resu, i, quad) + q;       /* phi_i */
+		    for (j = 0; j < M; j++) {
+			const FLOAT *gj_u = phgQuadGetBasisValues(e, resu, j, quad) + q;       /* phi_j */
+
+			for (k = 0; k < Dim; k++) 
+			    Mu[i][k][j][k] += vol*(*w) * (*gi_u)*(*gj_u);
+		    }
+		}
+
+		for (i = 0; i < N; i++) {
+		    const FLOAT *gi_p = phgQuadGetBasisValues(e, resp, i, quad) + q;       /* phi_i */
+		    for (j = 0; j < N; j++) {
+			const FLOAT *gj_p = phgQuadGetBasisValues(e, resp, j, quad) + q;       /* phi_j */
+
+			Mp[i][j] += vol*(*w) * (*gi_p)*(*gj_p);
+		    }
+		}
+		w++; p += Dim+1;
+	    } /* end quad pts */
+	
+
+	    for (i = 0; i < M; i++) 
+		for (k = 0; k < Dim; k++) 
+		    phgMatAddEntries(solver_u->mat, 1, Iu[i] + k, M*Dim, Iu[0],
+				     &(Mu[i][k][0][0]));
+	    for (i = 0; i < N; i++) 
+		phgMatAddEntries(solver_p->mat, 1, Ip + i, N, Ip,
+				 &Mp[i][0]);
+	
+	} /* end elements */
+
+	phgVecAssemble(solver_u->rhs);
+	phgVecAssemble(solver_p->rhs);
+	solver_u->rhs_updated = FALSE;
+	solver_p->rhs_updated = FALSE;
+    }
+
+    INT nu = solver_u->rhs->map->nlocal,
+	np = solver_p->rhs->map->nlocal;
+
+    memcpy(solver_u->rhs->data, residual->data, nu * sizeof(FLOAT));
+    memcpy(solver_p->rhs->data, residual->data + nu, np * sizeof(FLOAT));
+
+    phgSolverSolve(solver_u, FALSE, resu, NULL);
+    phgSolverSolve(solver_p, FALSE, resp, NULL);
+
+    char name[100];
+    /* sprintf(name, "res_%02d.plt", non_step); */
+    /* phgExportTecplot(g, name, ns->u[1], ns->p[1], resu, resp, NULL); */
+    sprintf(name, "res_%02d.vtk", non_step);
+    phgExportVTK(g, name, ns->u[1], ns->p[1], resu, resp, NULL);
+
+    /* phgDofFree(&resu); */
+    /* phgDofFree(&resp); */
+
+    phgFinalize();
+    exit(1);
+    return;
+}
+
+
+void
+plot_surf_force(NSSolver *ns)
+/* Plot surface force
+ *   f = p n - n \dot \tau 
+ * */
+{
+    GRID *g = ns->g;
+    INT i, j;
+    SURF_BAS *surf_bas = ns->surf_bas;
+    DOF *surf_dof = surf_bas->dof;
+    DOF *sforce_dof = phgDofNew(g, DOF_P1, 1, "sforce", DofNoAction);
+
+    phgDofSetDataByValue(sforce_dof, 0.);
+    
+    proj_gradu(ns, ns->gradu[1], NULL, 0);
+
+
+    FLOAT *dat_Gu = ns->Gradu->data;
+    FLOAT *dat_p  = ns->p[1]->data;
+    FLOAT *dat_f  = sforce_dof->data;
+    for (i = 0; i < g->nvert; i++) {
+	const FLOAT *normal, *gu;
+	FLOAT nu, p, en[Dim], f;
+
+	if (g->types_vert[i] & (BC_BOTTOM | BC_LATERAL)) { 
+
+	    if (g->types_vert[i] & BC_LATERAL)
+		normal = surf_dof->data + i * (Dim*Dim) + LN_DIR * Dim;
+
+	    if (g->types_vert[i] & BC_BOTTOM)
+		normal = surf_dof->data + i * (Dim*Dim) + UN_DIR * Dim;
+
+	    /* The case of bottom and latereal uses bottom normal */
+
+	    gu = dat_Gu + i * (Dim*Dim);
+	    nu = get_effective_viscosity(gu, 0, 0, ns->viscosity_type);
+	    p = dat_p[i];
+
+	    FLOAT eu[DDim];
+	    /* eu = .5 * gu + .5 * gu^T */
+	    MAT3_SYM(gu, eu);
+
+	    /* eu = eu / 1000 */
+	    MAT3_AXPBY(0., gu, 1./LEN_SCALING, eu);
+
+	    /* eu * n */
+	    MAT3_MV(eu, normal, en);
+	
+	    dat_f[i] = p * PRES_SCALING - nu * INNER_PRODUCT(en, normal);
+	}
+	else if (g->types_vert[i] & BC_FRONT) {
+	    /*
+	     * Note: ONLY for MISMIP front !!!
+	     * */
+	    const FLOAT x_dir[Dim] = {1, 0, 0};
+	    normal = x_dir;
+
+	    gu = dat_Gu + i * (Dim*Dim);
+	    nu = get_effective_viscosity(gu, 0, 0, ns->viscosity_type);
+	    p = dat_p[i];
+
+	    FLOAT eu[DDim];
+	    /* eu = .5 * gu + .5 * gu^T */
+	    MAT3_SYM(gu, eu);
+
+	    /* eu = eu / 1000 */
+	    MAT3_AXPBY(0., gu, 1./LEN_SCALING, eu);
+
+	    /* eu * n */
+	    MAT3_MV(eu, normal, en);
+	
+	    dat_f[i] = p * PRES_SCALING - nu * INNER_PRODUCT(en, normal);
+	}
+	    
+    }
+
+    phgExportVTK(g, "surf_force.vtk", sforce_dof, ns->p[1], ns->u[1], NULL);
+
+    /* phgDofFree(&resu); */
+    /* phgDofFree(&resp); */
+
+    phgFinalize();
+    exit(1);
+
+    return;
+}
+
+
+
+void 
+mark_inactive(NSSolver *ns)
+{
+    GRID *g = ns->g;
+    LAYERED_MESH *gL = ns->gL;
+    SIMPLEX **elist, *e;
+    int i, ii, k, n_inactive = 0; 
+    
+
+
+    /* first clear mark */
+    ForAllElements(g, e) {
+	for (k = 0; k < NFace; k++)
+	    e->bound_type[k] &= ~BC_INACTIVE;
     }
 
 
-    DOF *count = phgDofNew(g, DOF_P1, 1, "count", DofNoAction);
-    MAP *map_count = phgMapCreate(count, NULL);
-    VEC *vec_count = phgMapCreateVec(map_count, 1);
-    phgVecDisassemble(vec_count);
+    BOTTOM_FACE *fb = gL->face_bot;
+    for (ii = 0; ii < gL->nface_bot; ii++, fb++) {
+	TRIA *t = gL->trias + fb->tria;
+	INT vert_tri[3] = {t->verts[0],
+			   t->verts[1],
+			   t->verts[2]};
+	FLOAT *x_tri[3] = {gL->verts[vert_tri[0]], 
+			   gL->verts[vert_tri[1]], 
+			   gL->verts[vert_tri[2]]};
 
-    ForAllElements(g, e)
-    {
-        int M = count->type->nbas;	
-        FLOAT rhs[DDim][M], rhs1[M];
-        INT local_map_idx[M];
-        INT local_map_idx1[M];
+	/* any of height over height_eps  */
+	for (k = 0; k < 3; k++)
+	    if (x_tri[k][3] > HEIGHT_EPS * 1.01)
+		break;
+	if (k < 3)
+	    continue;
 
-        memset(rhs, 0, sizeof rhs); 
-        memset(rhs1, 0, sizeof rhs1); 
+	n_inactive++;
+	for (i = 0; i < fb->ne; i++) { /* tets */
+	    SIMPLEX *e = fb->elems[i];
+	    for (k = 0; k < NFace; k++)
+		e->bound_type[k] |= BC_INACTIVE;
+	}	
+    }
 
-        FLOAT *gue = DofElementData(gu_P0, e->index);
+    phgUpdateBoundaryTypes(g);
 
-        for (i = 0; i < M; i++)
-            rhs1[i] += 1;
 
-        for (k = 0; k < DDim; k++)
-        {
-            for (i = 0; i < M; i++)
-            {
-                rhs[k][i] += gue[k];
+    phgPrintf("   Mark inactive Elements %d.\n", n_inactive);
+
+    return;
+}
+
+
+
+
+
+
+
+
+/* --------------------------------------------------------------------------------
+ *
+ *  Solution errors 
+ *
+ *
+ * -------------------------------------------------------------------------------- */
+
+
+static int
+comp_coord(const void *p0, const void *p1)
+/* compares two 'INT's (used in qsort and bsearch) */
+{
+    int i;
+    FLOAT *Xa = (FLOAT *) p0;
+    FLOAT *Xb = (FLOAT *) p1;
+    const FLOAT eps = 1e-12;
+
+    /* X */
+    if (Xa[0] > Xb[0] + eps) 
+	return 1;
+    else if (Xa[0] < Xb[0] - eps)
+	return -1;
+
+    /* Y */
+    if (Xa[1] > Xb[1] + eps) 
+	return 1;
+    else if (Xa[1] < Xb[1] - eps)
+	return -1;
+
+    /* /\* Z *\/ */
+    /* if (Xa[2] > Xb[2] + eps)  */
+    /* 	return 1; */
+    /* else if (Xa[2] < Xb[2] - eps) */
+    /* 	return -1; */
+
+    /* Sigma */
+    if (Xa[3] > Xb[3] + eps)
+    	return 1;
+    else if (Xa[3] < Xb[3] - eps)
+    	return -1;
+    
+
+    return 0;			/* same */
+}
+
+
+
+void
+save_solution_dat(NSSolver *ns)
+/*
+ * Save solution on vertex,
+ * Reduce # of procs to ONE.
+ *
+ * */
+{
+
+    assert(!ns_params->solve_temp);
+
+#if 0
+    /* ------------------------------
+     *     Use parallel interp
+     * ------------------------------ */
+    
+    /* GIRD *g2; */
+    /* g2 = phgNewGrid(-1); */
+    /* phgSetPeriodicity(g2, ns_params->periodicity); */
+    /* phgImportSetBdryMapFunc(my_bc_map); */
+    /* if (!phgImport(g2, ns_params->fn, FALSE)) */
+    /* 	phgError(1, "can't read file \"%s\".\n", ns_params->fn); */
+    /* OCT_TREE *og = phgOctTreeBuild(ns->g); */
+    /* phgFreeGrid(&g2); */
+#endif
+
+
+
+#if 0    
+    /* ------------------------------
+     *     Save all data
+     * ------------------------------ */
+    
+    /* GRID *g = ns->g; */
+    /* char data_file[1000], fname[1000]; */
+    /* DOF *dof_coord, *dof_Gu, *dof_nu; */
+    
+    /* sprintf(data_file, OUTPUT_DIR "/result.dat"); */
+
+
+    /* sprintf(fname, "%s.Crd", data_file);		 */
+    /* save_dof_data3(g, dof_coord, fname); */
+
+    /* sprintf(fname, "%s.u", data_file);		 */
+    /* save_dof_data3(g, ns->u[1], fname); */
+
+    /* sprintf(fname, "%s.p", data_file);		 */
+    /* save_dof_data3(g, ns->p[1], fname); */
+
+    /* sprintf(fname, "%s.Gu", data_file);		 */
+    /* save_dof_data3(g, dof_Gu, fname); */
+
+    /* sprintf(fname, "%s.nu", data_file);		 */
+    /* save_dof_data3(g, dof_nu, fname); */
+#endif    
+
+
+
+
+    /* ------------------------------
+     *     Save only vertex data
+     * ------------------------------ */
+#if 0    
+    FILE *fp = fopen("result.dat", "w");
+    int rank, i, k;
+
+    for (rank = 0; rank < g->nprocs; rank++) {
+	if (g->rank != rank)
+	    continue;
+
+	/* for (i = 0; i < g->nvert; i++) { */
+	/*     if (!(g->types_vert & OWNER)) */
+	/* 	continue; */
+	/* } */
+
+	/* 3+3+1+9+1 = 17 */
+
+	/* Coord */
+	fwrite(&g->verts[0][0], g->nvert * Dim, sizeof(FLOAT), fp);
+
+	/* u */
+	fwrite(ns->u[1]->data, g->nvert * Dim, sizeof(FLOAT), fp);
+
+	/* p */
+	fwrite(ns->p[1]->data, g->nvert, sizeof(FLOAT), fp);
+
+	/* Gradu */
+	fwrite(dof_Gu, g->nvert * Dim*Dim, sizeof(FLOAT), fp);
+
+	/* nu */
+	fwrite(dof_nv, g->nvert, sizeof(FLOAT), fp);
+	
+    }
+    fclose(fp);
+#endif
+
+
+#define NDATA 19  // 3 + 1 + 3 + 1 + 9 + 1 + 1
+    
+    /* Gather to root */
+    GRID *g = ns->g;
+    INT ntotal, nlocal, *counts, *displs, ntotal0;
+    FLOAT *send_buf, *recv_buf = NULL, *send_ptr;
+    DOF *dof_nu = phgDofNew(g, DOF_P1, 1, "nu", DofNoAction);
+    int i, rank;
+    FILE *fp;
+
+    phgPrintf("   *Save solution data.\n");
+    counts = phgAlloc(2 * g->nprocs * sizeof(*counts));
+    displs = counts + g->nprocs;
+
+    nlocal = g->nvert * NDATA;
+    MPI_Allgather(&nlocal, 1, MPI_INT,
+		  counts, 1, MPI_INT, g->comm);
+
+    ntotal = 0;
+    for (rank = 0; rank < g->nprocs; rank++) {
+	displs[rank] = ntotal;
+	ntotal += counts[rank];
+    }
+
+    send_buf = phgCalloc(nlocal, NDATA * sizeof(FLOAT));
+    if (phgRank == 0)
+	recv_buf = phgCalloc(ntotal, NDATA * sizeof(FLOAT));
+
+    phgInfo(0, "nlocal: %d, ntotal: %d\n", nlocal / NDATA, ntotal / NDATA);
+    
+    proj_gradu(ns, ns->gradu[1], NULL, 0);
+    
+    FLOAT *dat_Crd = &g->verts[0][0];
+    FLOAT *dat_sigma = ns->coord_sigma->data;
+    FLOAT *dat_u   = ns->u[1]->data;
+    FLOAT *dat_p   = ns->p[1]->data;;
+    FLOAT *dat_p_static  = ns->p_static->data;;
+    FLOAT *dat_Gu  = ns->Gradu->data;
+    FLOAT *dat_nu  = dof_nu->data;
+    FLOAT *dat_dht = ns->dHt->data;
+
+    //phgDofDump(ns->dHt);
+
+    send_ptr = send_buf;
+    for (i = 0; i < g->nvert; i++) {
+	FLOAT nu;
+	
+	*(send_ptr++) = *(dat_Crd++);
+	*(send_ptr++) = *(dat_Crd++);
+	*(send_ptr++) = *(dat_Crd++);
+
+	*(send_ptr++) = *(dat_sigma++);
+	
+	*(send_ptr++) = *(dat_u++);
+	*(send_ptr++) = *(dat_u++);
+	*(send_ptr++) = *(dat_u++);
+
+    	*(send_ptr++) = *(dat_p++) - *(dat_p_static++);
+
+	nu = get_effective_viscosity(dat_Gu, 0, 0, ns->viscosity_type);
+	*(dat_nu++) = nu;
+	
+	*(send_ptr++) = *(dat_Gu++);
+	*(send_ptr++) = *(dat_Gu++);
+	*(send_ptr++) = *(dat_Gu++);
+	*(send_ptr++) = *(dat_Gu++);
+	*(send_ptr++) = *(dat_Gu++);
+	*(send_ptr++) = *(dat_Gu++);
+	*(send_ptr++) = *(dat_Gu++);
+	*(send_ptr++) = *(dat_Gu++);
+	*(send_ptr++) = *(dat_Gu++);
+
+	*(send_ptr++) = nu;
+
+	*(send_ptr++) = *(dat_dht++);
+    }
+
+    /* phgExportVTK(g, "output/all.vtk", */
+    /* 		 ns->u[1], ns->p[1], ns->Gradu, dof_nu, ns->dHt, NULL); */
+    
+    
+    MPI_Gatherv(send_buf, nlocal, PHG_MPI_FLOAT,
+		recv_buf, counts, displs, 
+		PHG_MPI_FLOAT, 0, g->comm);
+
+
+    phgInfo(0, "   Gather soltuion done.\n");
+
+    
+    if (phgRank == 0) {
+	/* for (i = 0; i < ntotal / NDATA; i++) { */
+	/*     const FLOAT *v = recv_buf + i*NDATA; */
+	/*     phgInfo(0, "Unsorted %20.10e %20.10e %20.10e    %20.10e %20.10e %20.10e %20.10e\n", */
+	/* 	    v[0], v[1], v[2], v[3], v[4], v[5], v[6]); */
+	/* } */
+
+	
+	/* Sort & Uniq */
+        qsort(recv_buf, ntotal / NDATA, NDATA * sizeof(FLOAT), comp_coord);
+	
+	{
+            INT i0 = 0;
+            for (i = i0+1; i < ntotal / NDATA; i++) {
+                int cmp = comp_coord(recv_buf + i0 * NDATA,
+				     recv_buf + i  * NDATA);
+                if (cmp < 0) {
+                    i0++;
+                    memmove(recv_buf + i0 * NDATA,
+			    recv_buf + i  * NDATA,
+			    NDATA * sizeof(FLOAT));
+                }
             }
+	    ntotal0 = i0 + 1;
         }
+	phgInfo(0, "   ntotal: %d\n", ntotal0);
 
+	/* Check */
+	for (i = 0; i < ntotal0; i++) {
+	    const FLOAT *v = recv_buf + i*NDATA;
+	    phgInfo(3, "sorted %20.10e %20.10e %20.10e %20.10e     %20.10e %20.10e %20.10e ... %20.10e \n",
+		    v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[NDATA-1]);
+	}
+	
 
-        for (i = 0; i < M; i++)
-        {
-            local_map_idx[i] = phgMapE2L(map_gu[0], 0, e, i);
-            local_map_idx1[i] = phgMapE2L(map_count, 0, e, i);
-            
-        }
-
-
-        for (k = 0; k < DDim; k++)
-            phgVecAddEntries(vec_gu[k], 0, M, local_map_idx, &rhs[k][0]);
-
-        phgVecAddEntries(vec_count, 0, M, local_map_idx1, &rhs1[0]);
-
+	/* Save to file */
+	fp = fopen("result.dat", "w");
+	fwrite(&ntotal0, 1, sizeof(INT), fp);
+	fwrite(recv_buf, ntotal0, NDATA * sizeof(FLOAT), fp);
+	fclose(fp);
+	phgFree(recv_buf);
     }
-
-    for (k = 0; k < DDim; k++)
-    {
-        phgVecAssemble(vec_gu[k]);
-        phgMapLocalDataToDof(map_gu[k], 1, &gu[k], vec_gu[k]->data);
-    }
-
-    phgVecAssemble(vec_count);
-    phgMapLocalDataToDof(map_count, 1, &count, vec_count->data);
     
-    FLOAT *data_all = DofData(gu_all);
-    FLOAT n;
-    FLOAT *data[DDim], *data1;
-    INT len, len1;
+    phgFree(send_buf);
 
-    for (k = 0; k < DDim; k++)
-    {
-        data[k] = DofData(gu[k]);
-        data1 = DofData(count);
-        len = DofGetDataCount(gu[k]);
-        len1 = DofGetDataCount(count);
-        assert(len == len1);
+    phgDofFree(&dof_nu);
+    return;
+}
 
-        for (i = 0; i < len; i++)
-        {
+static BOOLEAN ref_loaded = FALSE;
+static int n_ref_dat = 0;
+static FLOAT *ref_dat = NULL;
 
-            n = data1[i];
+void
+load_ref_solution()
+{
+    FILE *fp;
 
-            data[k][i] = data[k][i]/n;
 
-            //data_all[i*DDim+k] = data[k][i];
-
-        }
+    if (ref_loaded == FALSE) {
+	fp = fopen(ns_params->ref_sol_file, "r");
+	assert(fp != NULL);
+	assert(n_ref_dat == 0);
+	fread(&n_ref_dat, 1, sizeof(INT), fp);
+	ref_dat = phgCalloc(n_ref_dat, NDATA * sizeof(FLOAT));
+	fread(ref_dat, n_ref_dat, NDATA * sizeof(FLOAT), fp);
+	fclose(fp);
+	ref_loaded = TRUE;
     }
-
-    ForAllElements(g, e)
-    {
-        for (i = 0; i < Dim+1; i++)
-        {
-
-            INT local_idx = e->verts[i];
-            for (k = 0; k < DDim; k++)
-            DofVertexData(gu_all, local_idx)[k] = 
-                DofVertexData(gu[k], local_idx)[0];
-        }
-    }
-   
-    //phgMapDestroy(&map_gu);
-    //phgVecDestroy(&vec_gu);
-
-    //phgExportVTK(g, "avg_gu.vtk", gu[0], gu[1], gu[2], gu[3], gu[4], gu[5], gu[6], gu[7], gu[8], NULL);
-	//phgDofCopy(gu, &ns->gu, NULL, "gu");
-    phgDofCopy(gu_all, &ns->avg_gu, NULL, "avg_gu");
-
-    for (k = 0; k < DDim; k++)
-    {
-        phgDofFree(&gu[k]);
-        phgMapDestroy(&map_gu[k]);
-        phgVecDestroy(&vec_gu[k]);
-    }
-    phgDofFree(&u_P1);
-    phgDofFree(&gu_P0);
-    phgDofFree(&gu_all);
-    phgDofFree(&count);
-    phgMapDestroy(&map_count);
-    phgVecDestroy(&vec_count);
 
 }
 
 
-
-DOF * compare_two_dofs(DOF *a, DOF *b)
+const FLOAT *
+interp_ref_solution(FLOAT *X, FLOAT sigma)
 {
+    FLOAT Xext[NDATA];
+    FLOAT *found;
     
-    DOF *c = phgDofCopy(a, NULL, NULL, NULL);
+    Xext[0] = X[0];
+    Xext[1] = X[1];
+    Xext[2] = X[2];           /* z, not used  */
+    Xext[3] = sigma;	      /* Use sigma */
 
-    FLOAT *va = DofData(a);
-    FLOAT *vb = DofData(b);
-    FLOAT *vc = DofData(c);
+    found = bsearch(Xext, ref_dat,
+		    n_ref_dat, NDATA * sizeof(FLOAT), comp_coord);
+    assert(found);
 
-    INT len = DofGetDataCount(a);
-    INT i;
-
-    for (i = 0; i < len; i++)
-    {
-        if (va[i] != 0)
-            vc[i] = (va[i] - vb[i])/va[i];
-        else
-            vc[i] = 0;
-    }
-
-    return c;
-
+    return found + (Dim+1);
 }
 
-DOF * get_dof_component(GRID *g, DOF *a, DOF_TYPE *dof_type, INT dim_all, INT dim_asked)
+
+
+void
+compute_error_ref(NSSolver *ns)
+/* Compute error w.r.t ref  */
 {
-    INT i, k;
+    int ndof = 15;		/* 3+1+9+1+1 */
+    GRID *g = ns->g;
+    DOF *dofs[ndof];
+    DOF *errs[ndof];
+    FLOAT *ddats[ndof];
+    FLOAT *edats[ndof];
+    int i, k;
+    
+    load_ref_solution();
 
-    FLOAT *v = DofData(a);
-    INT len = DofGetDataCount(a)/dim_all;
-
-    DOF *cmpn = phgDofNew(g, dof_type, 1, "cmpn", DofNoAction);
-    FLOAT *v1 = DofData(cmpn);
-
-    for (i = 0; i < len; i++)
-    {
-        for (k = 0; k < dim_all; k++)
-        {
-            if (k == dim_asked)
-                v1[i] = v[i*dim_all+k];
-        }
+    for (k = 0; k < ndof; k++) {
+	dofs[k] = phgDofNew(g, DOF_P1, 1, NULL, DofNoAction);
+	errs[k] = phgDofNew(g, DOF_P1, 1, NULL, DofNoAction);
+	ddats[k] = dofs[k]->data;
+	edats[k] = errs[k]->data;
     }
 
-    return cmpn;
+    proj_gradu(ns, ns->gradu[1], NULL, 0);
+
+    DOF *uP1 = phgDofNew(g, DOF_P1, Dim, NULL, DofNoAction);
+    DOF *pP1 = phgDofNew(g, DOF_P1, 1, NULL, DofNoAction);
+    phgDofCopy(ns->u[1], &uP1, NULL, "uP1");
+    phgDofCopy(ns->p[1], &pP1, NULL, "pP1");
+
+    FLOAT *dat_Crd = &g->verts[0][0];
+    FLOAT *dat_u   = uP1->data;
+    FLOAT *dat_p   = pP1->data;;
+    FLOAT *dat_p_static   = ns->p_static->data;;
+    FLOAT *dat_Gu  = ns->Gradu->data;
+    FLOAT *dat_dht = ns->dHt->data;
+    FLOAT *coord_sigma = ns->coord_sigma->data;
+
+    for (i = 0; i < g->nvert; i++) {
+	const FLOAT *vref;
+	FLOAT nu;
+
+	vref = interp_ref_solution(g->verts[i], coord_sigma[i]);
+	phgInfo(3, "found %20.10e %20.10e %20.10e %20.10e    %20.10e   %20.10e %20.10e %20.10e\n",
+		vref[0], vref[1], vref[2], vref[3], vref[4], vref[5], vref[6], vref[7]);
+
+	k = 0;
+
+#define DIFF_DAT(solu_dat) {				\
+	    *(edats[k] + i) = *(solu_dat++) - vref[k];	\
+	    *(ddats[k] + i) = vref[k];			\
+	    k++;					\
+	}
+
+	DIFF_DAT(dat_u);
+	DIFF_DAT(dat_u);
+	DIFF_DAT(dat_u);
+
+	//DIFF_DAT(dat_p);
+	{
+	    *(edats[k] + i) = *(dat_p++) - *(dat_p_static++) - vref[k];	
+	    *(ddats[k] + i) = vref[k];			
+	    k++;					
+	}
+
+	nu = get_effective_viscosity(dat_Gu, 0, 0, ns->viscosity_type);
+	
+	DIFF_DAT(dat_Gu);
+	DIFF_DAT(dat_Gu);
+	DIFF_DAT(dat_Gu);
+	DIFF_DAT(dat_Gu);
+	DIFF_DAT(dat_Gu);
+	DIFF_DAT(dat_Gu);
+	DIFF_DAT(dat_Gu);
+	DIFF_DAT(dat_Gu);
+	DIFF_DAT(dat_Gu);
+
+	{
+	    *(edats[k] + i) = nu - vref[k];	
+	    *(ddats[k] + i) = vref[k];			
+	    k++;
+	}
+
+	DIFF_DAT(dat_dht);
+	    
+	assert(k == ndof);
+    }
+	
+
+#define PRINT_ERR(name) {						\
+	FLOAT uL2 = phgDofNormL2(dofs[k]);				\
+	FLOAT eL2 = phgDofNormL2(errs[k]);				\
+	FLOAT eMax = phgDofMaxValVec(errs[k]);				\
+	FLOAT eMin = phgDofMinValVec(errs[k]);				\
+	FLOAT uMax = phgDofMaxValVec(dofs[k]);				\
+	FLOAT uMin = phgDofMinValVec(dofs[k]);				\
+	phgPrintf("   Err " name					\
+		  ": %20.10e %20.10e   %20.10e %20.10e   %20.10e %20.10e \n", \
+		  eL2, eL2 / uL2, eMax, eMin, uMax, uMin		\
+		  );							\
+	k++;								\
+    }
+    
+    k = 0;
+    PRINT_ERR("u_");
+    PRINT_ERR("v_");
+    PRINT_ERR("w_");
+
+    PRINT_ERR("p_");
+
+    PRINT_ERR("ux");
+    PRINT_ERR("uy");
+    PRINT_ERR("uz");
+    PRINT_ERR("vx");
+    PRINT_ERR("vy");
+    PRINT_ERR("vz");
+    PRINT_ERR("wx");
+    PRINT_ERR("wy");
+    PRINT_ERR("wz");
+
+    PRINT_ERR("nu");
+
+    PRINT_ERR("dht");
+    
+    assert(k == ndof);
+    
+
+    for (k = 0; k < ndof; k++) {
+	phgDofFree(&dofs[k]);
+	phgDofFree(&errs[k]);
+    }
+
+    phgDofFree(&uP1);
+    phgDofFree(&pP1);
+
+    //dump_dof_ref(ns);
+    return;
 }
 
+
+void
+init_by_ref_solution(NSSolver *ns)
+{
+    GRID *g = ns->g;
+    int i, k;
+    
+    phgPrintf("   Init by ref...\n");
+    
+    load_ref_solution();
+
+    DOF *uP1 = phgDofNew(g, DOF_P1, Dim, NULL, DofNoAction);
+    DOF *pP1 = phgDofNew(g, DOF_P1, 1, NULL, DofNoAction);
+
+    FLOAT *dat_Crd = &g->verts[0][0];
+    FLOAT *dat_u   = uP1->data;
+    FLOAT *dat_p   = pP1->data;;
+    FLOAT *coord_sigma = ns->coord_sigma->data;
+    FLOAT *dat_nu   = ns->nu->data;;
+
+    phgPrintf("Init by interp ref soltuion.\n");
+    
+    for (i = 0; i < g->nvert; i++) {
+	const FLOAT *vref;
+	FLOAT nu;
+
+	vref = interp_ref_solution(g->verts[i], coord_sigma[i]);
+	phgInfo(3, "found %20.10e %20.10e %20.10e %20.10e    %20.10e   %20.10e %20.10e %20.10e\n",
+		vref[0], vref[1], vref[2], vref[3], vref[4], vref[5], vref[6], vref[7]);
+
+	dat_u[i * Dim + 0] = vref[0];
+	dat_u[i * Dim + 1] = vref[1];
+	dat_u[i * Dim + 2] = vref[2];
+	dat_p[i] = vref[3];
+	dat_nu[i] = vref[13];
+    }
+
+    get_p_static(ns);
+    phgDofAXPBY(1., ns->p_static, 1., &ns->p[1]); /* restore */
+
+    /* #warning --- Debug set pressure static ---     */
+    /*     phgDofAXPBY(1., ns->p_static, 0., &ns->p[1]); /\* restore *\/ */
+    //phgExportVTK(g, "dof_nu.vtk", ns->u[1], ns->p[1], ns->nu, NULL);
+
+
+    phgDofCopy(uP1, &ns->u[1], NULL, "u_{n+1}");
+    phgDofCopy(pP1, &ns->p[1], NULL, "p_{n+1}");
+
+    phgDofFree(&uP1);
+    phgDofFree(&pP1);
+
+    phgPrintf("   Init by ref Done.\n");
+
+    return;
+}
+
+
+
+
+
+
+
+
+
+
+/* void */
+/* dump_dof_ref(NSSolver *ns) */
+/* /\* Compute error w.r.t ref  *\/ */
+/* { */
+/*     int ndof = 15;		/\* 3+1+9+1 *\/ */
+/*     GRID *g = ns->g; */
+/*     DOF *dofs[ndof]; */
+/*     DOF *errs[ndof]; */
+/*     FLOAT *ddats[ndof]; */
+/*     FLOAT *edats[ndof]; */
+/*     int i, k; */
+    
+/*     for (k = 0; k < ndof; k++) { */
+/* 	dofs[k] = phgDofNew(g, DOF_P1, 1, NULL, DofNoAction); */
+/* 	errs[k] = phgDofNew(g, DOF_P1, 1, NULL, DofNoAction); */
+/* 	ddats[k] = dofs[k]->data; */
+/* 	edats[k] = errs[k]->data; */
+/*     } */
+
+/*     FLOAT *dat_Crd = &g->verts[0][0]; */
+/*     FLOAT *dat_u   = ns->u[1]->data; */
+/*     FLOAT *dat_p   = ns->p[1]->data;; */
+/*     FLOAT *dat_Gu  = ns->Gradu->data; */
+/*     FLOAT *dat_dht = ns->dHt->data; */
+
+/*     for (i = 0; i < g->nvert; i++) { */
+/* 	const FLOAT *vref; */
+/* 	FLOAT nu; */
+
+/* 	vref = interp_ref_solution(g->verts[i]); */
+
+
+/* 	k = 0; */
+
+/* #define DIFF_DAT(solu_dat) {				\ */
+/* 	    *(edats[k] + i) = *(solu_dat++);		\ */
+/* 	    *(ddats[k] + i) = vref[k];			\ */
+/* 	    k++;					\ */
+/* 	} */
+
+/* 	DIFF_DAT(dat_u); */
+/* 	DIFF_DAT(dat_u); */
+/* 	DIFF_DAT(dat_u); */
+
+/* 	DIFF_DAT(dat_p); */
+
+/* 	nu = get_effective_viscosity(dat_Gu, 0, 0, ns->viscosity_type); */
+	
+/* 	DIFF_DAT(dat_Gu); */
+/* 	DIFF_DAT(dat_Gu); */
+/* 	DIFF_DAT(dat_Gu); */
+/* 	DIFF_DAT(dat_Gu); */
+/* 	DIFF_DAT(dat_Gu); */
+/* 	DIFF_DAT(dat_Gu); */
+/* 	DIFF_DAT(dat_Gu); */
+/* 	DIFF_DAT(dat_Gu); */
+/* 	DIFF_DAT(dat_Gu); */
+
+/* 	{ */
+/* 	    *(edats[k] + i) = nu; */
+/* 	    *(ddats[k] + i) = vref[k];			 */
+/* 	    k++; */
+/* 	} */
+	
+/* 	assert(k == ndof); */
+/*     } */
+	
+
+/* #define PRINT_VEC(name) {					\ */
+/* 	MAP *map = phgMapCreate(dofs[k], NULL);			\ */
+/* 	VEC *vec = phgMapCreateVec(map, 1);			\ */
+/* 								\ */
+/* 	phgMapDofToLocalData(map, 1, &dofs[k], vec->data);	\ */
+/* 	phgVecDumpMATLAB(vec, name, name"r_.m");		\ */
+/* 								\ */
+/* 	phgMapDofToLocalData(map, 1, &errs[k], vec->data);	\ */
+/* 	phgVecDumpMATLAB(vec, name, name"_.m");			\ */
+/* 								\ */
+/* 	phgMapDestroy(&map);					\ */
+/* 	k++;							\ */
+/*     } */
+
+    
+/*     k = 0; */
+/*     PRINT_VEC("u"); */
+/*     PRINT_VEC("v"); */
+/*     PRINT_VEC("w"); */
+
+/*     PRINT_VEC("p"); */
+
+
+/*     for (k = 0; k < ndof; k++) { */
+/* 	phgDofFree(&dofs[k]); */
+/* 	phgDofFree(&errs[k]); */
+/*     } */
+
+/*     return; */
+/* } */
+
+
+/* --------------------------------------------------------------------------------
+ *
+ *  Misc utils
+ *
+ *
+ * -------------------------------------------------------------------------------- */
+
+const char *
+bdrymask2bit(short k)
+{
+    static char string[1024];
+
+#if 0
+    for (int c = 16; c >= 0; c--) {
+	k = n >> c;
+
+	if (k & 1)
+	    printf("1");
+	else
+	    printf("0");
+    }
+#else
+
+    int i = 0;
+
+    if (k == 0) {
+	string[i++] = 'U';
+	string[i++] = 'r';
+	string[i] = '\0';
+	return string;
+    }
+
+    if (k & OWNER)
+	string[i++] = 'O';
+
+    if (k & INTERIOR)
+	string[i++] = 'I';
+
+    if (k & REMOTE)
+	string[i++] = 'R';
+
+    if (k & DIRICHLET)
+	string[i++] = 'D';
+
+    if (k & NEUMANN)
+	string[i++] = 'N';
+
+    if (k & BDRY_USER0) {
+	string[i++] = 'u';
+	string[i++] = '0';
+    }
+    if (k & BDRY_USER1) {
+	string[i++] = 'u';
+	string[i++] = '1';
+    }
+    if (k & BDRY_USER2) {
+	string[i++] = 'u';
+	string[i++] = '2';
+    }
+    if (k & BDRY_USER3) {
+	string[i++] = 'u';
+	string[i++] = '3';
+    }
+    if (k & BDRY_USER4) {
+	string[i++] = 'u';
+	string[i++] = '4';
+    }
+    if (k & BDRY_USER5) {
+	string[i++] = 'u';
+	string[i++] = '5';
+    }
+    if (k & BDRY_USER6) {
+	string[i++] = 'u';
+	string[i++] = '6';
+    }
+    if (k & BDRY_USER7) {
+	string[i++] = 'u';
+	string[i++] = '7';
+    }
+    if (k & BDRY_USER8) {
+	string[i++] = 'u';
+	string[i++] = '8';
+    }
+    if (k & BDRY_USER9) {
+	string[i++] = 'u';
+	string[i++] = '9';
+    }
+
+    if (k & UNDEFINED) {
+	string[i++] = 'U';
+	string[i++] = 'd';
+    }
+
+    string[i] = '\0';
+    return string;
+
+#endif
+    
+}
+
+
+
+
+int
+phgCompEdge(const void *p0, const void *p1)
+/* compares two 'INT's (used in qsort and bsearch) */
+{
+    int i;
+    EdgeVerts *vts0 = (EdgeVerts *) p0;
+    EdgeVerts *vts1 = (EdgeVerts *) p1;
+
+    i = (*vts0)[0] - (*vts1)[0];
+
+    if (i < 0) {
+	return -1;
+    } else if (i > 0) {
+	return 1;
+    } else {
+	i = (*vts0)[1] - (*vts1)[1];
+	return (i < 0) ? -1 : ((i == 0) ? 0 : 1);
+    }
+
+}
+
+
+int
+phgCompEdgeMark(const void *p0, const void *p1)
+/* compares edges with mark (used in qsort and bsearch) */
+{
+    int i;
+    EdgeMarks *vts0 = (EdgeMarks *) p0;
+    EdgeMarks *vts1 = (EdgeMarks *) p1;
+
+    i = (*vts0)[0] - (*vts1)[0];
+
+    if (i < 0) {
+	return -1;
+    } else if (i > 0) {
+	return 1;
+    } else {
+	i = (*vts0)[1] - (*vts1)[1];
+	return (i < 0) ? -1 : ((i == 0) ? 0 : 1);
+    }
+
+}
 
 
 void get_avg_n(GRID *g, DOF *sur_normal)
@@ -673,143 +1835,3 @@ void get_avg_n(GRID *g, DOF *sur_normal)
     //phgExportVTK(g, "avg_n.vtk", sur_normal, NULL);
 }
 
-INT check_surf_convergence(NSSolver *ns, DOF *dH_last, FLOAT tol)
-{
-    INT dH_convergence;
-    DOF *pdH = phgDofCopy(ns->dH, NULL, NULL, "plus_dH");
-    DOF *mdH = phgDofCopy(ns->dH, NULL, NULL, "plus_dH");
-    phgDofAXPY(1, dH_last, &pdH);
-    phgDofAXPY(-1, dH_last, &mdH);
-    FLOAT relative_error_norm_dH = 2.0*phgDofNormL2(mdH)/phgDofNormL2(pdH);
-    phgPrintf("relative_error_norm dH: %f \n", relative_error_norm_dH);
-    phgDofFree(&pdH);
-    phgDofFree(&mdH);
-
-    if (relative_error_norm_dH < tol)
-    {
-        dH_convergence = 1;
-    }
-    else
-    {
-        dH_convergence = 0;
-    }
-
-    return dH_convergence;
-}
-
-INT check_u_convergence0(NSSolver *ns, DOF *u, DOF *p, DOF *u_last, DOF *p_last, FLOAT utol, FLOAT ptol)
-{
-
-    DOF *pu, *pp;
-    INT u_convergence;
-
-    pu = phgDofCopy(u, NULL, NULL, "plus_velocity");
-    pp = phgDofCopy(p, NULL, NULL, "plus_pressure");
-    phgDofAXPY(1, u_last, &pu);
-    phgDofAXPY(1, p_last, &pp);
-    FLOAT relative_error_norm_u = 2.0*phgDofNormL2(ns->du)/phgDofNormL2(pu);
-    FLOAT relative_error_norm_p = 2.0*phgDofNormL2(ns->dp)/phgDofNormL2(pp);
-    phgPrintf("relative_error_norm (u, p): %f %f\n", relative_error_norm_u, relative_error_norm_p);
-    phgDofFree(&pu);
-    phgDofFree(&pp);
-
-    if (relative_error_norm_u < utol && relative_error_norm_p < ptol)
-    {
-        u_convergence = 1;
-    }
-    else
-    {
-        u_convergence = 0;
-    }
-
-    return u_convergence;
-}
-
-INT check_u_convergence(NSSolver *ns, DOF *u, DOF *p, DOF *u_last, DOF *p_last, FLOAT utol, FLOAT ptol)
-{
-
-    DOF *pu, *pp;
-    INT u_convergence;
-
-    pu = phgDofCopy(u, NULL, NULL, "plus_velocity");
-    pp = phgDofCopy(p, NULL, NULL, "plus_pressure");
-    phgDofAXPY(1, u_last, &pu);
-    phgDofAXPY(1, p_last, &pp);
-    FLOAT relative_error_norm_u = 2.0*phgDofNormL2(ns->du)/phgDofNormL2(pu);
-    FLOAT relative_error_norm_p = 2.0*phgDofNormL2(ns->dp)/phgDofNormL2(pp);
-    phgPrintf("relative_error_norm (u, p): %f %f\n", relative_error_norm_u, relative_error_norm_p);
-    phgDofFree(&pu);
-    phgDofFree(&pp);
-
-    if (relative_error_norm_u < utol && relative_error_norm_p < ptol)
-    {
-        u_convergence = 1;
-    }
-    else
-    {
-        u_convergence = 0;
-    }
-
-    return u_convergence;
-}
-
-void get_viscosity_field(GRID *g, DOF *strain_rate_e, DOF *viscosity)
-{
-    FLOAT temperature = 271.15;
-    
-    INT i;
-    FLOAT A;
-
-    FLOAT n = 3.0;
-
-    //A = A_0_h*exp(-Q_h/(R*temperature));
-    A = 1e-25*SEC_PER_YEAR;
-
-    for (i = 0; i < DofGetDataCount(strain_rate_e); i++)
-    {
-        //printf("%f\n", strain_rate_e->data[i]);
-        viscosity->data[i] = 0.5*pow(A, -1.0/n)*pow(strain_rate_e->data[i]+1e-30, -1.0+1.0/n);
-        if (viscosity->data[i] > 1.0e20)
-            viscosity->data[i] = 1.0e20;
-    }
-}
-
-
-void get_effective_strain_rate_field(GRID *g, DOF *strain_rate, DOF *strain_rate_e)
-{
-
-    INT i;
-
-    FLOAT *eps = strain_rate->data;
-
-    for (i = 0; i < DofGetDataCount(strain_rate)/(Dim*Dim); i++)
-    {
-        strain_rate_e->data[i] = sqrt(0.5*(SQUARE(eps[0+i*Dim*Dim])
-                                          +SQUARE(eps[4+i*Dim*Dim])
-                                          +SQUARE(eps[8+i*Dim*Dim])
-                                          +2*SQUARE(eps[1+i*Dim*Dim])
-                                          +2*SQUARE(eps[2+i*Dim*Dim])
-                                          +2*SQUARE(eps[5+i*Dim*Dim])
-                                          ));
-    }
-}
-
-
-void get_strain_rate_field(GRID *g, DOF *velocity_grad, DOF *strain_rate)
-{
-
-    INT i;
-
-    for (i = 0; i < DofGetDataCount(velocity_grad)/(Dim*Dim); i++)
-    {
-        strain_rate->data[0+i*Dim*Dim] = velocity_grad->data[0+i*Dim*Dim];
-        strain_rate->data[1+i*Dim*Dim] = 0.5*(velocity_grad->data[1+i*Dim*Dim]+velocity_grad->data[3+i*Dim*Dim]);
-        strain_rate->data[2+i*Dim*Dim] = 0.5*(velocity_grad->data[2+i*Dim*Dim]+velocity_grad->data[6+i*Dim*Dim]);
-        strain_rate->data[3+i*Dim*Dim] = strain_rate->data[1+i*Dim*Dim];
-        strain_rate->data[4+i*Dim*Dim] = velocity_grad->data[4+i*Dim*Dim];
-        strain_rate->data[5+i*Dim*Dim] = 0.5*(velocity_grad->data[5+i*Dim*Dim]+velocity_grad->data[7+i*Dim*Dim]);
-        strain_rate->data[6+i*Dim*Dim] = strain_rate->data[2+i*Dim*Dim];
-        strain_rate->data[7+i*Dim*Dim] = strain_rate->data[5+i*Dim*Dim];
-        strain_rate->data[8+i*Dim*Dim] = velocity_grad->data[8+i*Dim*Dim];
-    }
-}
