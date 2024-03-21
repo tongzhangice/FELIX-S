@@ -1,8 +1,8 @@
 # FELIX-S-FO (the model name will be updated soon...)
 A full Stokes and higher-order ice sheet model
 
-# A brief tutorial of FELIX-S
-All files are included in the folder "FELIXS". The "$dir" below refers to the directory of your "FELIXS" folder.
+# A brief tutorial 
+The source files are placed in the folder "FELIXS". The "$dir" below refers to the directory of your "FELIXS" folder.
 
 ## Meshing
 ### Install Ann
