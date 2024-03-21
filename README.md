@@ -1,5 +1,5 @@
-# FELIX-S-FO
-full Stokes ice sheet model
+# FELIX-S-FO (the model name will be updated soon...)
+A full Stokes and higher-order ice sheet model
 
 # A brief tutorial of FELIX-S
 All files are included in the folder "FELIXS". The "$dir" below refers to the directory of your "FELIXS" folder.
